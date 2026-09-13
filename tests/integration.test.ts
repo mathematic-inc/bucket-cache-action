@@ -130,6 +130,9 @@ beforeAll(async () => {
       "--rm",
       "--name",
       container,
+      ...(process.platform === "linux"
+        ? ["--user", `${process.getuid?.()}:${process.getgid?.()}`]
+        : []),
       "--publish",
       "127.0.0.1::9000",
       "--mount",

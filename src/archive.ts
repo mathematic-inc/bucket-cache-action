@@ -24,20 +24,30 @@ export async function pack(
   compression: CompressionMethod,
 ): Promise<string | undefined> {
   const matcher = await glob.create(patterns.join("\n"), {
-    implicitDescendants: false,
+    implicitDescendants: true,
     followSymbolicLinks: false,
     omitBrokenSymbolicLinks: false,
   });
   const paths = await matcher.glob();
   if (!paths.length) return undefined;
   const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-  const files = paths.map((file) => path.relative(workspace, file).replaceAll("\\", "/") || ".");
+  const files = paths.map((file) => {
+    const relative = path.relative(workspace, file).replaceAll("\\", "/") || ".";
+    return path.isAbsolute(relative) ? relative : `./${relative}`;
+  });
   const destination = path.join(directory, "cache.tar.compressed");
   // Caches may explicitly include directories outside the workspace. Only
   // principals trusted to supply executable dependencies may write a cache.
   await pipeline(
     tar.create(
-      { cwd: workspace, preservePaths: true, portable: true, follow: false, strict: true },
+      {
+        cwd: workspace,
+        preservePaths: true,
+        portable: true,
+        follow: false,
+        noDirRecurse: true,
+        strict: true,
+      },
       files,
     ),
     compression === "zstd" ? createZstdCompress() : createGzip(),

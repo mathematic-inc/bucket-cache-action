@@ -211,7 +211,7 @@ export function namespace(
 ): string {
   const version = createHash("sha256")
     .update(
-      JSON.stringify(["mathematic-bucket-cache-v2", config.paths, compression, platform, arch]),
+      JSON.stringify(["mathematic-bucket-cache-v3", config.paths, compression, platform, arch]),
     )
     .digest("hex");
   const prefix = `${config.prefix.replace(/\/+$/, "")}/${config.repository}/${version}/`;

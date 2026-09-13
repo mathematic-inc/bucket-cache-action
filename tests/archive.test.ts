@@ -62,3 +62,30 @@ it.skipIf(process.platform !== "win32")(
     }
   },
 );
+
+it("honors nested exclusions without treating at-prefixed file names as tar directives", async () => {
+  const directory = await mkdtemp(path.join(process.cwd(), "archive-test-"));
+  const cache = path.join(directory, "cache");
+  const output = path.join(directory, "archive");
+  try {
+    await mkdir(cache);
+    await mkdir(output);
+    vi.stubEnv("GITHUB_WORKSPACE", directory);
+    await writeFile(path.join(cache, "keep"), "included");
+    await writeFile(path.join(cache, "omit"), "excluded");
+    await writeFile(path.join(directory, "@literal"), "literal file");
+    const file = await pack(
+      output,
+      [cache, `!${path.join(cache, "omit")}`, path.join(directory, "@literal")],
+      CompressionMethod.Zstd,
+    );
+    await rm(cache, { recursive: true });
+    await rm(path.join(directory, "@literal"));
+    await unpack(file!, CompressionMethod.Zstd);
+    expect(await readFile(path.join(cache, "keep"), "utf8")).toBe("included");
+    await expect(readFile(path.join(cache, "omit"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(path.join(directory, "@literal"), "utf8")).toBe("literal file");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
