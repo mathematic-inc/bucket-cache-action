@@ -8,9 +8,7 @@ export function describe(error: unknown): string {
   if (error instanceof CacheError) return error.message;
   if (!error || typeof error !== "object") return "unknown error";
   const code =
-    "name" in error &&
-    typeof error.name === "string" &&
-    /^[A-Za-z0-9_]+$/.test(error.name)
+    "name" in error && typeof error.name === "string" && /^[A-Za-z0-9_]+$/.test(error.name)
       ? error.name
       : "Error";
   const metadata = "$metadata" in error ? error.$metadata : undefined;
@@ -31,12 +29,7 @@ export function status(error: unknown): number | undefined {
     )
       return metadata.httpStatusCode;
   }
-  if (
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    typeof error.code === "number"
-  )
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "number")
     return error.code;
   return undefined;
 }

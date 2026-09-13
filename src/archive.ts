@@ -1,17 +1,16 @@
 import { CacheError } from "./errors.js";
-// Archive handling follows runs-on/cache, reusing the pinned GitHub toolkit's
-// GNU/BSD tar and Windows support. No GitHub cache service API is called.
-import { createTar, extractTar } from "@actions/cache/lib/internal/tar.js";
-import {
-  getCacheFileName,
-  resolvePaths,
-} from "@actions/cache/lib/internal/cacheUtils.js";
-import type { CompressionMethod } from "@actions/cache/lib/internal/constants.js";
-import { createReadStream } from "node:fs";
+import * as glob from "@actions/glob";
+import * as tar from "tar";
+import { createReadStream, createWriteStream } from "node:fs";
 import { mkdtemp, mkdir, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { createZstdCompress, createZstdDecompress, createGzip, createGunzip } from "node:zlib";
+
+export const CompressionMethod = { Gzip: "gzip", Zstd: "zstd" } as const;
+export type CompressionMethod = (typeof CompressionMethod)[keyof typeof CompressionMethod];
 
 export async function temporaryDirectory(): Promise<string> {
   const parent = process.env.RUNNER_TEMP || tmpdir();
@@ -24,24 +23,41 @@ export async function pack(
   patterns: string[],
   compression: CompressionMethod,
 ): Promise<string | undefined> {
-  const paths = await resolvePaths(patterns);
+  const matcher = await glob.create(patterns.join("\n"), {
+    implicitDescendants: false,
+    followSymbolicLinks: false,
+    omitBrokenSymbolicLinks: false,
+  });
+  const paths = await matcher.glob();
   if (!paths.length) return undefined;
-  if (
-    paths.some((value) => /^[\-]/.test(value) || /[\x00-\x1f\x7f]/.test(value))
-  ) {
-    throw new CacheError(
-      "A resolved cache path cannot be represented safely in the tar manifest",
-    );
-  }
-  await createTar(directory, paths, compression);
-  return path.join(directory, getCacheFileName(compression));
+  const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
+  const files = paths.map((file) => path.relative(workspace, file).replaceAll("\\", "/") || ".");
+  const destination = path.join(directory, "cache.tar.compressed");
+  // Caches may explicitly include directories outside the workspace. Only
+  // principals trusted to supply executable dependencies may write a cache.
+  await pipeline(
+    tar.create(
+      { cwd: workspace, preservePaths: true, portable: true, follow: false, strict: true },
+      files,
+    ),
+    compression === "zstd" ? createZstdCompress() : createGzip(),
+    createWriteStream(destination),
+  );
+  return destination;
 }
 
-export async function unpack(
-  file: string,
-  compression: CompressionMethod,
-): Promise<void> {
-  await extractTar(file, compression);
+export async function unpack(file: string, compression: CompressionMethod): Promise<void> {
+  await pipeline(
+    createReadStream(file),
+    compression === "zstd" ? createZstdDecompress() : createGunzip(),
+    tar.extract({
+      cwd: process.env.GITHUB_WORKSPACE || process.cwd(),
+      preservePaths: true,
+      preserveOwner: false,
+      chmod: true,
+      strict: true,
+    }),
+  );
 }
 
 export async function digest(file: string): Promise<string> {

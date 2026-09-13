@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
-import { getCompressionMethod } from "@actions/cache/lib/internal/cacheUtils.js";
 import path from "node:path";
+import { CompressionMethod } from "./archive.js";
 import {
   readConfig,
   namespace,
@@ -40,7 +40,7 @@ export async function restore(registerPost: boolean): Promise<void> {
   let storage: ReturnType<typeof createStorage> | undefined;
   let directory: string | undefined;
   try {
-    const compression = await getCompressionMethod();
+    const compression = CompressionMethod.Zstd;
     const prefix = namespace(config, compression);
     storage = createStorage(config, prefix);
     const signal = AbortSignal.timeout(config.timeoutSeconds * 1000);
@@ -51,8 +51,7 @@ export async function restore(registerPost: boolean): Promise<void> {
       await storage.download(entry, archive, signal);
       await unpack(archive, compression);
     }
-    if (!entry && config.failOnMiss)
-      throw new CacheError("No cache matched the requested keys");
+    if (!entry && config.failOnMiss) throw new CacheError("No cache matched the requested keys");
     core.setOutput("cache-hit", String(entry?.key === config.key));
     core.setOutput("cache-matched-key", entry?.key || "");
     core.info(
@@ -100,11 +99,7 @@ async function saveSnapshot(snapshot: Snapshot): Promise<void> {
       archive,
       AbortSignal.timeout(config.timeoutSeconds * 1000),
     );
-    core.info(
-      saved
-        ? "Bucket cache saved"
-        : "Bucket cache already saved by another job",
-    );
+    core.info(saved ? "Bucket cache saved" : "Bucket cache already saved by another job");
   } catch (error) {
     report("save", error, config.failOnError);
   } finally {
@@ -132,7 +127,7 @@ export async function post(): Promise<void> {
 export async function save(): Promise<void> {
   const config = configuration();
   if (!config) return;
-  const compression = await getCompressionMethod();
+  const compression = CompressionMethod.Zstd;
   await saveSnapshot({
     config,
     compression,

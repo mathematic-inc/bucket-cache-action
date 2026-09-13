@@ -6,7 +6,7 @@ Reference revision: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203
 https://github.com/runs-on/cache
 https://github.com/actions/cache
 
-The pinned @actions/cache package supplies archive and glob handling only.
-The S3 and GCS action does not use GitHub's cache service, RunsOn discovery, presigned
+The tar package and Node native zstd implement archiving; @actions/glob
+resolves path patterns. The S3 and GCS action does not use GitHub's cache service, RunsOn discovery, presigned
 URLs, or provider-specific credential overrides. Bundled dependency licenses
 are distributed in dist/licenses.txt.

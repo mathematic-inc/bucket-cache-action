@@ -22,11 +22,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
       - run: npm ci --ignore-scripts
-      - run: npm run check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run format:check
       - run: npm test
       - run: npm run build
       - run: git diff --exit-code -- dist
@@ -53,7 +55,7 @@ jobs:
           persist-credentials: false
       - name: Start disposable S3
         run: |
-          docker run --detach --rm --name cache-post-test --publish 127.0.0.1:9000:9000 --tmpfs /data:rw,size=64m --env MINIO_ROOT_USER=cache-test --env MINIO_ROOT_PASSWORD=cache-test-password minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
+          docker run --detach --rm --name cache-post-test --publish 127.0.0.1:9000:9000 --tmpfs /data:rw,size=64m --env MINIO_ROOT_USER=cache-test --env MINIO_ROOT_PASSWORD=cache-test-password quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/ready; then break; fi
             sleep 1

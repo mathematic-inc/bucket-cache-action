@@ -2,7 +2,7 @@ import { CacheError } from "./errors.js";
 import * as core from "@actions/core";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { CompressionMethod } from "@actions/cache/lib/internal/constants.js";
+import { CompressionMethod } from "./archive.js";
 
 const key = z
   .string()
@@ -10,7 +10,10 @@ const key = z
   .max(512)
   .refine(
     (value) =>
-      !/[\x00-\x1f\x7f,]/.test(value) &&
+      !value.includes(",") &&
+      !Array.from(value).some(
+        (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      ) &&
       !value.startsWith("/") &&
       !value.split("/").some((part) => part === "." || part === ".."),
     "Keys must not contain control characters, commas, or traversal segments",
@@ -43,11 +46,7 @@ export const configSchema = z
     forcePathStyle: z.boolean(),
     role: z
       .string()
-      .refine(
-        (value) =>
-          !value ||
-          /^arn:aws(?:-[a-z0-9-]+)?:iam::\d{12}:role\/.+$/.test(value),
-      ),
+      .refine((value) => !value || /^arn:aws(?:-[a-z0-9-]+)?:iam::\d{12}:role\/.+$/.test(value)),
     audience: z.string().min(1),
     paths: z.array(z.string().min(1)).min(1),
     key,
@@ -118,9 +117,7 @@ export const configSchema = z
     if (
       config.serviceAccount &&
       (!config.workloadIdentityProvider ||
-        !/^[a-zA-Z0-9_.-]+@[a-zA-Z0-9-]+\.iam\.gserviceaccount\.com$/.test(
-          config.serviceAccount,
-        ))
+        !/^[a-zA-Z0-9_.-]+@[a-zA-Z0-9-]+\.iam\.gserviceaccount\.com$/.test(config.serviceAccount))
     )
       ctx.addIssue({
         code: "custom",
@@ -130,8 +127,7 @@ export const configSchema = z
     if (config.workloadIdentityProvider && config.credentialsFile)
       ctx.addIssue({
         code: "custom",
-        message:
-          "Select workload identity or an ADC credentials file, not both",
+        message: "Select workload identity or an ADC credentials file, not both",
       });
     if (config.anonymous) {
       try {
@@ -146,8 +142,7 @@ export const configSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["anonymous"],
-          message:
-            "Anonymous GCS access requires a loopback emulator without credentials",
+          message: "Anonymous GCS access requires a loopback emulator without credentials",
         });
       }
     }
@@ -175,8 +170,7 @@ export function readConfig(input = core.getInput, env = process.env): Config {
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
-  const number = (name: string, fallback: number) =>
-    input(name) ? Number(input(name)) : fallback;
+  const number = (name: string, fallback: number) => (input(name) ? Number(input(name)) : fallback);
   const provider = input("provider") || "s3";
   return configSchema.parse({
     provider,
@@ -217,13 +211,7 @@ export function namespace(
 ): string {
   const version = createHash("sha256")
     .update(
-      JSON.stringify([
-        "mathematic-bucket-cache-v1",
-        config.paths,
-        compression,
-        platform,
-        arch,
-      ]),
+      JSON.stringify(["mathematic-bucket-cache-v2", config.paths, compression, platform, arch]),
     )
     .digest("hex");
   const prefix = `${config.prefix.replace(/\/+$/, "")}/${config.repository}/${version}/`;

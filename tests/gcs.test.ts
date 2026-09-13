@@ -68,9 +68,7 @@ describe("GCS contract", () => {
       vi.fn(async (input: URL | string, init?: RequestInit) => {
         requests.push(init?.method || "GET");
         if (init?.method === "POST") {
-          expect(
-            new URL(String(input)).searchParams.get("ifGenerationMatch"),
-          ).toBe("0");
+          expect(new URL(String(input)).searchParams.get("ifGenerationMatch")).toBe("0");
           return new Response("", {
             status: 200,
             headers: { Location: endpoint + "/session" },
@@ -112,7 +110,9 @@ describe("GCS contract", () => {
           });
         if (attempts++ < 1) throw new TypeError("test connection loss");
         expect(range).toBe("bytes 2-7/8");
-        expect(await (init?.body as Blob).text()).toBe("ntents");
+        const body = init?.body;
+        if (!(body instanceof Blob)) throw new Error("Expected Blob upload body");
+        expect(await body.text()).toBe("ntents");
         return new Response("{}", { status: 200 });
       }),
     );
@@ -150,8 +150,7 @@ describe("GCS contract", () => {
       AbortSignal.timeout(1000),
     );
     let content = "";
-    for await (const chunk of result.body)
-      content += Buffer.from(chunk).toString();
+    for await (const chunk of result.body) content += Buffer.from(chunk).toString();
     expect(content).toBe("contents");
   });
   it("passes pagination tokens without changing the requested prefix", async () => {
@@ -175,11 +174,7 @@ describe("GCS contract", () => {
       }),
     );
     expect(
-      await new GcsBucket(config()).list(
-        "cache/tools/",
-        "next",
-        AbortSignal.timeout(1000),
-      ),
+      await new GcsBucket(config()).list("cache/tools/", "next", AbortSignal.timeout(1000)),
     ).toEqual({
       items: [
         {
@@ -191,8 +186,7 @@ describe("GCS contract", () => {
     });
   });
   it("obtains a fresh GitHub token for the configured workload identity audience", async () => {
-    const provider =
-      "projects/123/locations/global/workloadIdentityPools/github/providers/github";
+    const provider = "projects/123/locations/global/workloadIdentityPools/github/providers/github";
     const bucket = new GcsBucket(
       config({
         anonymous: "false",
@@ -201,22 +195,13 @@ describe("GCS contract", () => {
       }),
     );
     expect(bucket.auth).toBeInstanceOf(IdentityPoolClient);
-    if (!(bucket.auth instanceof IdentityPoolClient))
-      throw new Error("Wrong auth client");
+    if (!(bucket.auth instanceof IdentityPoolClient)) throw new Error("Wrong auth client");
     expect(await bucket.auth.retrieveSubjectToken()).toBe("test-oidc-token");
-    expect(core.getIDToken).toHaveBeenCalledWith(
-      `//iam.googleapis.com/${provider}`,
-    );
+    expect(core.getIDToken).toHaveBeenCalledWith(`//iam.googleapis.com/${provider}`);
   });
   it("refuses anonymous access to a non-loopback host or mixed provider authentication", () => {
-    expect(() =>
-      config({ endpoint: "https://storage.googleapis.com" }),
-    ).toThrow();
-    expect(() =>
-      config({ "role-to-assume": "arn:aws:iam::123456789012:role/cache" }),
-    ).toThrow();
-    expect(() =>
-      config({ anonymous: "false", bucket: "valid_gcs_bucket" }),
-    ).not.toThrow();
+    expect(() => config({ endpoint: "https://storage.googleapis.com" })).toThrow();
+    expect(() => config({ "role-to-assume": "arn:aws:iam::123456789012:role/cache" })).toThrow();
+    expect(() => config({ anonymous: "false", bucket: "valid_gcs_bucket" })).not.toThrow();
   });
 });

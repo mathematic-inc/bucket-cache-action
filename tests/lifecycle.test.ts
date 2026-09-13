@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CompressionMethod } from "@actions/cache/lib/internal/constants.js";
+import { CompressionMethod } from "../src/archive.js";
 import { namespace, readConfig, type Snapshot } from "../src/config.js";
 
 const fixture = vi.hoisted(() => ({
@@ -39,14 +39,13 @@ vi.mock("../src/storage.js", () => ({
   }),
 }));
 vi.mock("../src/archive.js", () => ({
+  CompressionMethod: { Gzip: "gzip", Zstd: "zstd" },
   temporaryDirectory: async () => "/test/temporary",
   pack: fixture.pack,
   unpack: fixture.unpack,
   cleanup: fixture.cleanup,
 }));
-vi.mock("@actions/cache/lib/internal/cacheUtils.js", () => ({
-  getCompressionMethod: async () => "gzip",
-}));
+
 import { post, restore, execute } from "../src/lifecycle.js";
 
 beforeEach(() => {
@@ -78,11 +77,7 @@ describe("automatic cache lifecycle", () => {
     fixture.inputs.key = "changed-after-restore";
     fixture.inputs.path = "another-path";
     await post();
-    expect(fixture.pack).toHaveBeenCalledWith(
-      "/test/temporary",
-      [".cache"],
-      "gzip",
-    );
+    expect(fixture.pack).toHaveBeenCalledWith("/test/temporary", [".cache"], "zstd");
     expect(fixture.upload).toHaveBeenCalledWith(
       "original",
       "/test/temporary/archive",
@@ -163,9 +158,7 @@ describe("automatic cache lifecycle", () => {
     fixture.inputs["save-if"] = "true";
     fixture.state.snapshot = "secret private config";
     await execute(post);
-    expect(fixture.failure).toHaveBeenCalledWith(
-      "Bucket cache action failed: SyntaxError",
-    );
+    expect(fixture.failure).toHaveBeenCalledWith("Bucket cache action failed: SyntaxError");
   });
   it("stores a validated snapshot of configuration without authentication tokens", async () => {
     await restore(true);
@@ -174,8 +167,8 @@ describe("automatic cache lifecycle", () => {
     });
     const expected: Snapshot = {
       config,
-      compression: CompressionMethod.Gzip,
-      namespace: namespace(config, CompressionMethod.Gzip),
+      compression: CompressionMethod.Zstd,
+      namespace: namespace(config, CompressionMethod.Zstd),
       matchedKey: "",
     };
     expect(JSON.parse(fixture.state.snapshot!)).toEqual(expected);

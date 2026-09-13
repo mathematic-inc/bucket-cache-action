@@ -10,10 +10,7 @@ import {
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
-import {
-  STSClient,
-  AssumeRoleWithWebIdentityCommand,
-} from "@aws-sdk/client-sts";
+import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
 import * as core from "@actions/core";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
@@ -94,11 +91,7 @@ export class S3Bucket implements Bucket {
       throw error;
     }
   }
-  async list(
-    prefix: string,
-    token: string | undefined,
-    signal: AbortSignal,
-  ): Promise<Page> {
+  async list(prefix: string, token: string | undefined, signal: AbortSignal): Promise<Page> {
     const result = await this.client.send(
       new ListObjectsV2Command({
         Bucket: this.config.bucket,
@@ -118,12 +111,7 @@ export class S3Bucket implements Bucket {
       token: result.IsTruncated ? result.NextContinuationToken : undefined,
     };
   }
-  async read(
-    entry: Entry,
-    start: number,
-    end: number,
-    signal: AbortSignal,
-  ): Promise<Range> {
+  async read(entry: Entry, start: number, end: number, signal: AbortSignal): Promise<Range> {
     const result = await this.client.send(
       new GetObjectCommand({
         Bucket: this.config.bucket,
@@ -176,8 +164,7 @@ export class S3Bucket implements Bucket {
       new CreateMultipartUploadCommand({ ...params, Metadata: { sha256 } }),
       { abortSignal: signal },
     );
-    if (!created.UploadId)
-      throw new CacheError("S3 did not return a multipart upload ID");
+    if (!created.UploadId) throw new CacheError("S3 did not return a multipart upload ID");
     const upload = { ...params, UploadId: created.UploadId };
     const cancel = new AbortController();
     const combined = AbortSignal.any([signal, cancel.signal]);
@@ -186,6 +173,7 @@ export class S3Bucket implements Bucket {
     const parts: { PartNumber: number; ETag: string }[] = [];
     let next = 0;
     let completed = false;
+    let failure: unknown;
     try {
       const worker = async () => {
         try {
@@ -206,13 +194,11 @@ export class S3Bucket implements Bucket {
                   }),
                   { abortSignal: combined },
                 );
-                if (!result.ETag)
-                  throw new CacheError("S3 did not return a multipart ETag");
+                if (!result.ETag) throw new CacheError("S3 did not return a multipart ETag");
                 parts.push({ PartNumber: index + 1, ETag: result.ETag });
                 break;
               } catch (error) {
-                if (combined.aborted || attempt === 2 || status(error) === 403)
-                  throw error;
+                if (combined.aborted || attempt === 2 || status(error) === 403) throw error;
               } finally {
                 body.destroy();
               }
@@ -224,10 +210,7 @@ export class S3Bucket implements Bucket {
         }
       };
       const results = await Promise.allSettled(
-        Array.from(
-          { length: Math.min(this.config.concurrency, count) },
-          worker,
-        ),
+        Array.from({ length: Math.min(this.config.concurrency, count) }, worker),
       );
       const failure = results.find((result) => result.status === "rejected");
       if (failure?.status === "rejected") throw failure.reason;
@@ -242,10 +225,8 @@ export class S3Bucket implements Bucket {
         { abortSignal: combined },
       );
       completed = true;
-      return true;
     } catch (error) {
-      if (status(error) === 412) return false;
-      throw error;
+      failure = error;
     } finally {
       if (!completed) {
         // Cleanup has its own deadline: the transfer signal may already be
@@ -255,9 +236,17 @@ export class S3Bucket implements Bucket {
             abortSignal: AbortSignal.timeout(30000),
           });
         } catch (error) {
-          if (status(error) !== 404) throw error;
+          if (status(error) !== 404)
+            failure = failure
+              ? new AggregateError([failure, error], "Upload and cleanup failed")
+              : error;
         }
       }
     }
+    if (failure) {
+      if (status(failure) === 412) return false;
+      throw failure;
+    }
+    return true;
   }
 }

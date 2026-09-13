@@ -148,8 +148,8 @@ Objects use this layout:
 The version is a SHA-256 digest of the format version, path patterns,
 compression, OS, and architecture. A format-specific salt prevents accidental
 reuse of runs-on/cache archives. Existing caches start cold after migration.
-GNU/BSD tar handling comes from the pinned GitHub toolkit; zstd is used when
-available, with gzip as the fallback. Paths outside the workspace and file modes
+Archives use the current `tar` package and Node 24's native zstd implementation;
+no system tar or compression binary is required. Paths outside the workspace and file modes
 are preserved. Windows and Unix archives are deliberately separated.
 
 Neither backend enforces GitHub's branch cache restrictions. Repository names and
@@ -192,7 +192,8 @@ than silently reclassified as misses.
 
 ## Development
 
-Node.js 24 or newer is required. Action consumers run the committed bundles in
+Node.js 24 or newer is required. Oxfmt formats the source, Oxlint checks it with
+type information, and TypeScript performs a separate typecheck. Action consumers run the committed bundles in
 `dist` and do not need `npm install`.
 
 ```sh

@@ -1,9 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import * as core from "@actions/core";
-import {
-  STSClient,
-  AssumeRoleWithWebIdentityCommand,
-} from "@aws-sdk/client-sts";
+import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
 import { S3Bucket } from "../src/storage/s3.js";
 import { readConfig } from "../src/config.js";
 vi.mock("@actions/core", () => ({
@@ -49,30 +46,26 @@ it("uses AWS STS with a fresh GitHub identity for each phase instead of inherite
   vi.stubEnv("AWS_ACCESS_KEY_ID", "deployment-access");
   vi.stubEnv("AWS_SECRET_ACCESS_KEY", "deployment-secret");
   const role = "arn:aws:iam::123456789012:role/cache";
-  const send = vi
-    .spyOn(STSClient.prototype, "send")
-    .mockImplementation(async (command) => {
-      expect(command).toBeInstanceOf(AssumeRoleWithWebIdentityCommand);
-      expect(command.input).toMatchObject({
-        RoleArn: role,
-        WebIdentityToken: "test-oidc-token",
-        DurationSeconds: 3600,
-      });
-      return {
-        Credentials: {
-          AccessKeyId: "cache-access",
-          SecretAccessKey: "cache-secret",
-          SessionToken: "cache-session",
-          Expiration: new Date(Date.now() + 3600000),
-        },
-      };
+  const send = vi.spyOn(STSClient.prototype, "send").mockImplementation(async (command) => {
+    expect(command).toBeInstanceOf(AssumeRoleWithWebIdentityCommand);
+    expect(command.input).toMatchObject({
+      RoleArn: role,
+      WebIdentityToken: "test-oidc-token",
+      DurationSeconds: 3600,
     });
+    return {
+      Credentials: {
+        AccessKeyId: "cache-access",
+        SecretAccessKey: "cache-secret",
+        SessionToken: "cache-session",
+        Expiration: new Date(Date.now() + 3600000),
+      },
+    };
+  });
   for (let phase = 0; phase < 2; phase++) {
     const bucket = new S3Bucket(config(role));
     try {
-      expect((await bucket.client.config.credentials()).accessKeyId).toBe(
-        "cache-access",
-      );
+      expect((await bucket.client.config.credentials()).accessKeyId).toBe("cache-access");
     } finally {
       bucket.close();
     }

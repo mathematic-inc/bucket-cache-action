@@ -12,7 +12,7 @@ import { GcsBucket } from "../src/storage/gcs.js";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { readConfig, namespace } from "../src/config.js";
-import { CompressionMethod } from "@actions/cache/lib/internal/constants.js";
+import { CompressionMethod } from "../src/archive.js";
 import {
   mkdtemp,
   mkdir,
@@ -92,29 +92,24 @@ async function action(
   for (const [key, value] of Object.entries(input))
     env[`INPUT_${key.replaceAll(" ", "_").toUpperCase()}`] = value;
   for (const [key, value] of Object.entries(state)) env[`STATE_${key}`] = value;
-  const result = await new Promise<{ code: number | null; log: string }>(
-    (resolve, reject) => {
-      const child = spawn(
-        process.execPath,
-        [path.resolve(`dist/${kind}.cjs`)],
-        { env, cwd: work },
-      );
-      let log = "";
-      child.stdout.on("data", (data) => {
-        log += data.toString();
-      });
-      child.stderr.on("data", (data) => {
-        log += data.toString();
-      });
-      child.on("error", reject);
-      child.on("exit", (code) => resolve({ code, log }));
-    },
-  );
+  const result = await new Promise<{ code: number | null; log: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, [path.resolve(`dist/${kind}.cjs`)], { env, cwd: work });
+    let log = "";
+    child.stdout.on("data", (data) => {
+      log += data.toString();
+    });
+    child.stderr.on("data", (data) => {
+      log += data.toString();
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => resolve({ code, log }));
+  });
   const parse = (text: string) =>
     Object.fromEntries(
-      [...text.matchAll(/^([^\n]+)<<([^\n]+)\n([\s\S]*?)\n\2(?:\n|$)/gm)].map(
-        (match) => [match[1], match[3]],
-      ),
+      [...text.matchAll(/^([^\n]+)<<([^\n]+)\n([\s\S]*?)\n\2(?:\n|$)/gm)].map((match) => [
+        match[1],
+        match[3],
+      ]),
     );
   return {
     ...result,
@@ -143,7 +138,7 @@ beforeAll(async () => {
       `MINIO_ROOT_USER=${credentials.accessKeyId}`,
       "--env",
       `MINIO_ROOT_PASSWORD=${credentials.secretAccessKey}`,
-      "minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+      "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
       "server",
       "/data",
     ],
@@ -174,8 +169,7 @@ beforeAll(async () => {
   listener.listen(0, "127.0.0.1");
   await once(listener, "listening");
   const address = listener.address();
-  if (!address || typeof address === "string")
-    throw new Error("No emulator port");
+  if (!address || typeof address === "string") throw new Error("No emulator port");
   const gcsPort = address.port;
   await new Promise<void>((resolve) => listener.close(() => resolve()));
   gcsEndpoint = `http://127.0.0.1:${gcsPort}`;
@@ -205,15 +199,13 @@ beforeAll(async () => {
   );
   const gcsDeadline = Date.now() + 20000;
   while (true) {
-    if (gcs.exitCode !== null)
-      throw new Error("GCS emulator exited during startup");
+    if (gcs.exitCode !== null) throw new Error("GCS emulator exited during startup");
     try {
       if ((await fetch(`${gcsEndpoint}/storage/v1/b`)).ok) break;
     } catch (error) {
       if (Date.now() > gcsDeadline) throw error;
     }
-    if (Date.now() > gcsDeadline)
-      throw new Error("GCS emulator startup timed out");
+    if (Date.now() > gcsDeadline) throw new Error("GCS emulator startup timed out");
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   const created = await fetch(`${gcsEndpoint}/storage/v1/b`, {
@@ -248,14 +240,13 @@ describe("real S3 transfers and packaged action", () => {
       cache.upload("multipart", file, AbortSignal.timeout(30000)),
       cache.upload("multipart", file, AbortSignal.timeout(30000)),
     ]);
-    expect(results.sort()).toEqual([false, true]);
+    expect(results.sort((a, b) => Number(a) - Number(b))).toEqual([false, true]);
     const entry = await cache.lookup(AbortSignal.timeout(30000));
     expect(entry).toBeDefined();
     await cache.download(entry!, restored, AbortSignal.timeout(30000));
     expect(await readFile(restored)).toEqual(content);
     expect(
-      (await client.send(new ListMultipartUploadsCommand({ Bucket: bucket })))
-        .Uploads || [],
+      (await client.send(new ListMultipartUploadsCommand({ Bucket: bucket }))).Uploads || [],
     ).toEqual([]);
   }, 60000);
   it("rejects corrupt cache metadata without extracting data", async () => {
@@ -267,26 +258,19 @@ describe("real S3 transfers and packaged action", () => {
         Body: "unverified archive",
       }),
     );
-    await expect(cache.lookup(AbortSignal.timeout(5000))).rejects.toThrow(
-      "metadata",
-    );
+    await expect(cache.lookup(AbortSignal.timeout(5000))).rejects.toThrow("metadata");
   });
   it("saves only in the post phase, preserving file modes and symlinks", async () => {
     const work = path.join(directory, "workspace");
     await mkdir(work);
     const input = values("post-lifecycle");
-    const restored = await action(
-      "index",
-      { ...input, "save-if": "false" },
-      {},
-      work,
-    );
+    const restored = await action("index", { ...input, "save-if": "false" }, {}, work);
     expect(restored.code, restored.log).toBe(0);
     expect(restored.outputs["cache-hit"]).toBe("false");
     expect(
-      (
-        await client.send(new ListObjectsV2Command({ Bucket: bucket }))
-      ).Contents?.some((object) => object.Key?.endsWith("/post-lifecycle")),
+      (await client.send(new ListObjectsV2Command({ Bucket: bucket }))).Contents?.some((object) =>
+        object.Key?.endsWith("/post-lifecycle"),
+      ),
     ).toBe(false);
     await mkdir(path.join(work, "cache"));
     await writeFile(path.join(work, "cache", "tool"), "installed tool");
@@ -301,38 +285,20 @@ describe("real S3 transfers and packaged action", () => {
     expect(saved.code, saved.log).toBe(0);
     expect(saved.log).toContain("Bucket cache saved");
     await rm(path.join(work, "cache"), { recursive: true });
-    const hit = await action(
-      "index",
-      { ...input, "save-if": "false" },
-      {},
-      work,
-    );
+    const hit = await action("index", { ...input, "save-if": "false" }, {}, work);
     expect(hit.code, hit.log).toBe(0);
     expect(hit.outputs["cache-hit"]).toBe("true");
-    expect(await readFile(path.join(work, "cache", "tool"), "utf8")).toBe(
-      "installed tool",
-    );
-    expect((await stat(path.join(work, "cache", "tool"))).mode & 0o777).toBe(
-      0o755,
-    );
+    expect(await readFile(path.join(work, "cache", "tool"), "utf8")).toBe("installed tool");
+    expect((await stat(path.join(work, "cache", "tool"))).mode & 0o777).toBe(0o755);
     expect(await readlink(path.join(work, "cache", "link"))).toBe("tool");
-    const skipped = await action(
-      "index",
-      { ...input, "save-if": "true" },
-      hit.state,
-      work,
-    );
+    const skipped = await action("index", { ...input, "save-if": "true" }, hit.state, work);
     expect(skipped.log).toContain("Skipping cache save: exact hit");
   }, 60000);
   it("does not save when the final save-if expression is false", async () => {
     const input = values("no-post-save");
     const first = await action("index", input);
     expect(first.code, first.log).toBe(0);
-    const result = await action(
-      "index",
-      { ...input, "save-if": "false" },
-      first.state,
-    );
+    const result = await action("index", { ...input, "save-if": "false" }, first.state);
     expect(result.code, result.log).toBe(0);
     expect(result.log).toContain("save-if is false");
   });
@@ -356,11 +322,7 @@ function gcsStore(key: string) {
   const config = readConfig((name) => input[name] || "", {
     GITHUB_REPOSITORY: "test/repository",
   });
-  return new Storage(
-    new GcsBucket(config),
-    config,
-    namespace(config, CompressionMethod.Gzip),
-  );
+  return new Storage(new GcsBucket(config), config, namespace(config, CompressionMethod.Gzip));
 }
 describe("GCS emulator and packaged action", () => {
   it("resumes chunked uploads and pins range downloads to the object generation", async () => {
@@ -369,12 +331,8 @@ describe("GCS emulator and packaged action", () => {
     const destination = path.join(directory, "gcs-restored");
     const bytes = randomBytes(12 * 1024 ** 2);
     await writeFile(file, bytes);
-    expect(
-      await cache.upload("gcs-chunked", file, AbortSignal.timeout(30000)),
-    ).toBe(true);
-    expect(
-      await cache.upload("gcs-chunked", file, AbortSignal.timeout(30000)),
-    ).toBe(false);
+    expect(await cache.upload("gcs-chunked", file, AbortSignal.timeout(30000))).toBe(true);
+    expect(await cache.upload("gcs-chunked", file, AbortSignal.timeout(30000))).toBe(false);
     const entry = await cache.lookup(AbortSignal.timeout(10000));
     expect(entry).toBeDefined();
     const rawResponse = await fetch(
@@ -392,29 +350,17 @@ describe("GCS emulator and packaged action", () => {
     const work = path.join(directory, "gcs-workspace");
     await mkdir(work);
     const input = gcsValues("gcs-post");
-    const first = await action(
-      "index",
-      { ...input, "save-if": "false" },
-      {},
-      work,
-    );
+    const first = await action("index", { ...input, "save-if": "false" }, {}, work);
     expect(first.code, first.log).toBe(0);
     expect(first.outputs["cache-hit"]).toBe("false");
     await mkdir(path.join(work, "cache"));
     await writeFile(path.join(work, "cache", "tool"), "installed from GCS");
-    const saved = await action(
-      "index",
-      { ...input, "save-if": "true" },
-      first.state,
-      work,
-    );
+    const saved = await action("index", { ...input, "save-if": "true" }, first.state, work);
     expect(saved.code, saved.log).toBe(0);
     await rm(path.join(work, "cache"), { recursive: true });
     const hit = await action("restore", input, {}, work);
     expect(hit.code, hit.log).toBe(0);
     expect(hit.outputs["cache-hit"]).toBe("true");
-    expect(await readFile(path.join(work, "cache", "tool"), "utf8")).toBe(
-      "installed from GCS",
-    );
+    expect(await readFile(path.join(work, "cache", "tool"), "utf8")).toBe("installed from GCS");
   }, 60000);
 });

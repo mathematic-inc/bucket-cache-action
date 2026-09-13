@@ -55,9 +55,7 @@ describe("S3 key selection", () => {
       expect(command.input).toMatchObject({ Key: "namespace/exact" });
       return metadata;
     });
-    expect((await storage.lookup(AbortSignal.timeout(1000)))?.key).toBe(
-      "exact",
-    );
+    expect((await storage.lookup(AbortSignal.timeout(1000)))?.key).toBe("exact");
     expect(send).toHaveBeenCalledTimes(1);
   });
   it("selects the newest match across pages before considering the next prefix", async () => {
@@ -69,28 +67,21 @@ describe("S3 key selection", () => {
         return metadata;
       }
       expect(command).toBeInstanceOf(ListObjectsV2Command);
-      if (!(command instanceof ListObjectsV2Command))
-        throw new Error("unexpected command");
+      if (!(command instanceof ListObjectsV2Command)) throw new Error("unexpected command");
       expect(command.input.Prefix).toBe("namespace/old/");
       if (!command.input.ContinuationToken)
         return {
-          Contents: [
-            { Key: "namespace/old/first", LastModified: new Date(1), Size: 1 },
-          ],
+          Contents: [{ Key: "namespace/old/first", LastModified: new Date(1), Size: 1 }],
           IsTruncated: true,
           NextContinuationToken: "page-2",
         };
       expect(command.input.ContinuationToken).toBe("page-2");
       return {
-        Contents: [
-          { Key: "namespace/old/newest", LastModified: new Date(2), Size: 1 },
-        ],
+        Contents: [{ Key: "namespace/old/newest", LastModified: new Date(2), Size: 1 }],
         IsTruncated: false,
       };
     });
-    expect((await storage.lookup(AbortSignal.timeout(1000)))?.key).toBe(
-      "old/newest",
-    );
+    expect((await storage.lookup(AbortSignal.timeout(1000)))?.key).toBe("old/newest");
   });
   it("does not reinterpret access denied as a cache miss", async () => {
     const { storage, send } = setup();
@@ -98,9 +89,7 @@ describe("S3 key selection", () => {
       $metadata: { httpStatusCode: 403 },
     });
     send.mockRejectedValue(denied);
-    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toBe(
-      denied,
-    );
+    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toBe(denied);
     expect(send).toHaveBeenCalledTimes(1);
   });
   it("rejects invalid pagination instead of returning a partial match", async () => {
@@ -109,16 +98,12 @@ describe("S3 key selection", () => {
       if (command instanceof HeadObjectCommand) throw missing;
       return { IsTruncated: true };
     });
-    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toThrow(
-      "pagination",
-    );
+    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toThrow("pagination");
   });
   it("rejects caches without a checksum before downloading", async () => {
     const { storage, send } = setup();
     send.mockImplementation(async () => ({ ...metadata, Metadata: {} }));
-    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toThrow(
-      "metadata",
-    );
+    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toThrow("metadata");
   });
 });
 
@@ -136,9 +121,7 @@ describe("S3 range download", () => {
       return {
         ContentRange: `bytes 0-${contents.length - 1}/${contents.length}`,
         ContentLength: contents.length,
-        Body: Readable.from([
-          attempts === 1 ? contents.subarray(0, 2) : contents,
-        ]),
+        Body: Readable.from([attempts === 1 ? contents.subarray(0, 2) : contents]),
       };
     });
     const directory = await mkdtemp(

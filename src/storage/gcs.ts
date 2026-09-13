@@ -30,9 +30,7 @@ export class GcsBucket implements Bucket {
   readonly endpoint: URL;
   readonly auth: GoogleAuth | IdentityPoolClient | undefined;
   constructor(readonly config: Config) {
-    this.endpoint = new URL(
-      config.endpoint || "https://storage.googleapis.com",
-    );
+    this.endpoint = new URL(config.endpoint || "https://storage.googleapis.com");
     const scopes = ["https://www.googleapis.com/auth/devstorage.read_write"];
     if (config.anonymous) this.auth = undefined;
     else if (config.workloadIdentityProvider) {
@@ -73,9 +71,7 @@ export class GcsBucket implements Bucket {
     retry = true,
   ): Promise<Response> {
     if (url.origin !== this.endpoint.origin)
-      throw new CacheError(
-        "GCS response tried to change the configured endpoint",
-      );
+      throw new CacheError("GCS response tried to change the configured endpoint");
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted();
       const headers = new Headers(init.headers);
@@ -96,11 +92,7 @@ export class GcsBucket implements Bucket {
       }
       if (response.ok || accepted.includes(response.status)) return response;
       await response.body?.cancel();
-      if (
-        !retry ||
-        attempt === 2 ||
-        ![408, 429, 500, 502, 503, 504].includes(response.status)
-      )
+      if (!retry || attempt === 2 || ![408, 429, 500, 502, 503, 504].includes(response.status))
         throw new GcsError(response.status);
       await setTimeout(250 * (attempt + 1), undefined, { signal });
     }
@@ -121,18 +113,12 @@ export class GcsBucket implements Bucket {
     };
   }
 
-  async list(
-    prefix: string,
-    token: string | undefined,
-    signal: AbortSignal,
-  ): Promise<Page> {
+  async list(prefix: string, token: string | undefined, signal: AbortSignal): Promise<Page> {
     const url = this.url();
     url.searchParams.set("prefix", prefix);
     url.searchParams.set("maxResults", "1000");
     if (token) url.searchParams.set("pageToken", token);
-    const result = listSchema.parse(
-      await (await this.request(url, {}, signal)).json(),
-    );
+    const result = listSchema.parse(await (await this.request(url, {}, signal)).json());
     return {
       items: (result.items || [])
         .filter((item) => Number(item.size) > 0)
@@ -144,12 +130,7 @@ export class GcsBucket implements Bucket {
     };
   }
 
-  async read(
-    entry: Entry,
-    start: number,
-    end: number,
-    signal: AbortSignal,
-  ): Promise<Range> {
+  async read(entry: Entry, start: number, end: number, signal: AbortSignal): Promise<Range> {
     const url = this.url(entry.key);
     url.searchParams.set("alt", "media");
     url.searchParams.set("generation", entry.version);
@@ -158,8 +139,7 @@ export class GcsBucket implements Bucket {
       { headers: { Range: `bytes=${start}-${end}` } },
       signal,
     );
-    if (!response.body)
-      throw new CacheError("GCS did not return a response body");
+    if (!response.body) throw new CacheError("GCS did not return a response body");
     return {
       body: Readable.from(response.body),
       contentRange: response.headers.get("content-range") || "",
@@ -199,14 +179,11 @@ export class GcsBucket implements Bucket {
       );
       const location = created.headers.get("location");
       await created.body?.cancel();
-      if (!location)
-        throw new CacheError("GCS did not return a resumable upload session");
+      if (!location) throw new CacheError("GCS did not return a resumable upload session");
       session = new URL(location, this.endpoint);
       core.setSecret(session.href);
       if (session.origin !== this.endpoint.origin)
-        throw new CacheError(
-          "GCS upload session changed the configured endpoint",
-        );
+        throw new CacheError("GCS upload session changed the configured endpoint");
       const file = await openAsBlob(source);
       let offset = 0;
       let stalled = 0;
@@ -252,9 +229,7 @@ export class GcsBucket implements Bucket {
         }
         if (response.ok) {
           if (end !== bytes)
-            throw new CacheError(
-              "GCS confirmed completion before the entire archive was uploaded",
-            );
+            throw new CacheError("GCS confirmed completion before the entire archive was uploaded");
           completed = true;
           await response.body?.cancel();
           return true;
@@ -264,12 +239,9 @@ export class GcsBucket implements Bucket {
         const match = range && /^bytes=0-(\d+)$/.exec(range);
         const next = match ? Number(match[1]) + 1 : 0;
         if (next < offset || next > end || next > bytes)
-          throw new CacheError(
-            "GCS returned an invalid resumable upload offset",
-          );
+          throw new CacheError("GCS returned an invalid resumable upload offset");
         stalled = next === offset ? stalled + 1 : 0;
-        if (stalled >= 3)
-          throw new CacheError("GCS resumable upload made no progress");
+        if (stalled >= 3) throw new CacheError("GCS resumable upload made no progress");
         offset = next;
       }
       throw new CacheError("GCS did not confirm upload completion");

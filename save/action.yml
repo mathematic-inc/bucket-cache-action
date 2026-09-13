@@ -9,8 +9,7 @@ inputs:
     description: Existing bucket name in the selected provider.
     required: true
   region:
-    description:
-      S3/STS region; defaults to AWS_REGION or AWS_DEFAULT_REGION. Not
+    description: S3/STS region; defaults to AWS_REGION or AWS_DEFAULT_REGION. Not
       required for GCS.
   path:
     description: Newline-separated files, directories, or glob patterns to cache.
@@ -22,8 +21,7 @@ inputs:
     description: Object namespace prefix, followed by repository, archive version, and key.
     default: cache
   role-to-assume:
-    description:
-      Optional IAM role ARN assumed with GitHub OIDC independently during
+    description: Optional IAM role ARN assumed with GitHub OIDC independently during
       restore and post-job save.
   audience:
     description: Audience for GitHub OIDC tokens.
@@ -61,8 +59,7 @@ inputs:
     description: Optional GCS service account to impersonate with
       workload-identity-provider.
   anonymous:
-    description:
-      GCS emulator-only anonymous access; requires an explicit loopback
+    description: GCS emulator-only anonymous access; requires an explicit loopback
       endpoint and cannot be combined with credentials.
     default: "false"
 runs:
