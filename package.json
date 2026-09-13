@@ -1,0 +1,41 @@
+{
+  "name": "@mathematic-inc/bucket-cache-action",
+  "version": "1.0.0",
+  "private": true,
+  "description": "S3 and GCS caching for GitHub Actions",
+  "license": "MIT",
+  "repository": "github:mathematic-inc/bucket-cache-action",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "npm run lint && npm run typecheck && npm run format:check",
+    "format": "oxfmt --write .",
+    "test": "vitest run --exclude tests/integration.test.ts",
+    "test:integration": "node scripts/setup-test-tools.mjs && vitest run tests/integration.test.ts",
+    "lint": "oxlint --type-aware --deny-warnings",
+    "typecheck": "tsc --noEmit",
+    "format:check": "oxfmt --check ."
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1",
+    "@actions/glob": "0.7.0",
+    "@aws-sdk/client-s3": "3.1131.0",
+    "@aws-sdk/client-sts": "3.1131.0",
+    "google-auth-library": "11.0.2",
+    "tar": "7.5.22",
+    "zod": "4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "esbuild": "0.28.2",
+    "oxfmt": "0.67.0",
+    "oxlint": "1.82.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0",
+    "yaml": "2.9.1"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

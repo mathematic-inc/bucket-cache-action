@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+.test-cache/
+.test-cache-*/
+archive-test-*/
+range-test-*/
+.test-tools/

@@ -1,0 +1,26 @@
+name: Verify automatic cache save
+description: Test-only post step that checks S3 after the cache post step has run.
+inputs:
+  bucket:
+    required: true
+    description: Test bucket.
+  region:
+    default: us-east-1
+    description: Test region.
+  endpoint:
+    required: true
+    description: Loopback S3 endpoint.
+  path:
+    required: true
+    description: Tested cache paths.
+  key:
+    required: true
+    description: Tested cache key.
+  expected:
+    required: true
+    description: Whether the cache should exist after the job.
+runs:
+  using: node24
+  main: verify.cjs
+  post: verify.cjs
+  post-if: always()
