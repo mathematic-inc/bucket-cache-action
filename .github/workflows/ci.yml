@@ -1,0 +1,100 @@
+name: Verify bucket cache
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: cache-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - run: git diff --exit-code -- dist
+      - if: runner.os == 'Linux'
+        run: npm run test:integration
+  post-job:
+    name: Post-job policy (${{ matrix.policy }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        policy: [default, late-outcome, never]
+    env:
+      AWS_ACCESS_KEY_ID: cache-test
+      AWS_SECRET_ACCESS_KEY: cache-test-password
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Start disposable S3
+        run: |
+          docker run --detach --rm --name cache-post-test --publish 127.0.0.1:9000:9000 --tmpfs /data:rw,size=64m --env MINIO_ROOT_USER=cache-test --env MINIO_ROOT_PASSWORD=cache-test-password minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/ready; then break; fi
+            sleep 1
+          done
+          aws --endpoint-url http://127.0.0.1:9000 s3api create-bucket --bucket test-cache-bucket
+      # Registered first so this assertion runs after the cache's post step.
+      - uses: $/.github/actions/verify-post
+        with:
+          bucket: test-cache-bucket
+          endpoint: http://127.0.0.1:9000
+          path: .post-cache
+          key: post-job-test
+          expected: ${{ matrix.policy != 'never' }}
+      - if: matrix.policy == 'default'
+        uses: $/
+        with:
+          bucket: test-cache-bucket
+          region: us-east-1
+          endpoint: http://127.0.0.1:9000
+          force-path-style: "true"
+          path: .post-cache
+          key: post-job-test
+          fail-on-error: "true"
+      - if: matrix.policy != 'default'
+        uses: $/
+        with:
+          bucket: test-cache-bucket
+          region: us-east-1
+          endpoint: http://127.0.0.1:9000
+          force-path-style: "true"
+          path: .post-cache
+          key: post-job-test
+          fail-on-error: "true"
+          save-if: ${{ matrix.policy == 'late-outcome' && steps.later.outcome == 'failure' && steps.install.outcome == 'success' }}
+      - id: install
+        name: Populate cache after restore
+        run: |
+          mkdir -p .post-cache
+          echo 'installed dependency' > .post-cache/tool
+      - id: later
+        if: matrix.policy == 'late-outcome'
+        name: Supply a later failed outcome for the post expression
+        continue-on-error: true
+        run: exit 1

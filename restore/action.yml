@@ -1,0 +1,92 @@
+name: Bucket cache restore
+description: Restore files from S3 or GCS without a post-job save.
+author: Mathematic
+inputs:
+  provider:
+    description: "Object storage provider: s3 or gcs."
+    default: s3
+  bucket:
+    description: Existing bucket name in the selected provider.
+    required: true
+  region:
+    description:
+      S3/STS region; defaults to AWS_REGION or AWS_DEFAULT_REGION. Not
+      required for GCS.
+  path:
+    description: Newline-separated files, directories, or glob patterns to cache.
+    required: true
+  key:
+    description: Immutable cache key. Exact matches take priority over restore-keys.
+    required: true
+  restore-keys:
+    description:
+      Ordered newline-separated fallback prefixes; the newest matching
+      object wins.
+  prefix:
+    description: Object namespace prefix, followed by repository, archive version, and key.
+    default: cache
+  role-to-assume:
+    description:
+      Optional IAM role ARN assumed with GitHub OIDC independently during
+      restore and post-job save.
+  audience:
+    description: Audience for GitHub OIDC tokens.
+    default: sts.amazonaws.com
+  endpoint:
+    description: Optional HTTP(S) API endpoint without embedded credentials.
+      Defaults to the selected cloud provider.
+  force-path-style:
+    description: Use path-style S3 requests; S3 only.
+    default: "false"
+  lookup-only:
+    description: Look up a key without downloading or saving files.
+    default: "false"
+  fail-on-cache-miss:
+    description: Fail the action if no cache matches.
+    default: "false"
+  fail-on-error:
+    description: Fail on S3 or archive errors instead of warning. Invalid inputs
+      always fail.
+    default: "false"
+  timeout-seconds:
+    description: Deadline for each bucket restore or upload operation.
+    default: "600"
+  concurrency:
+    description: Parallel upload parts and download ranges, between 1 and 32.
+    default: "4"
+  part-size-mib:
+    description: Upload part and download range size, between 5 and 512 MiB.
+    default: "32"
+  max-size-mib:
+    description: Maximum compressed archive size; larger archives are rejected
+      before upload or download.
+    default: "102400"
+  credentials-file:
+    description: GCS ADC credential configuration file. Defaults to
+      GOOGLE_APPLICATION_CREDENTIALS; its path is preserved for the post phase.
+  workload-identity-provider:
+    description: GCS GitHub Workload Identity Federation provider resource name.
+      Obtains fresh credentials in each phase.
+  service-account:
+    description: Optional GCS service account to impersonate with
+      workload-identity-provider.
+  anonymous:
+    description:
+      GCS emulator-only anonymous access; requires an explicit loopback
+      endpoint and cannot be combined with credentials.
+    default: "false"
+outputs:
+  cache-hit:
+    description:
+      True only when the exact requested key was found and restored (or
+      found in lookup-only mode).
+  cache-primary-key:
+    description: The original requested key.
+  cache-matched-key:
+    description: The exact or fallback key that matched, or an empty string on a miss.
+runs:
+  using: node24
+  main: ../dist/restore.cjs
+branding:
+  icon: archive
+  color: blue

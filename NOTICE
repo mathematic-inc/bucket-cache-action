@@ -7,6 +7,6 @@ https://github.com/runs-on/cache
 https://github.com/actions/cache
 
 The pinned @actions/cache package supplies archive and glob handling only.
-The action does not use GitHub's cache service, RunsOn discovery, presigned
+The S3 and GCS action does not use GitHub's cache service, RunsOn discovery, presigned
 URLs, or provider-specific credential overrides. Bundled dependency licenses
 are distributed in dist/licenses.txt.
