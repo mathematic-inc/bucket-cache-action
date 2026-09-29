@@ -141,7 +141,7 @@ beforeAll(async () => {
       `MINIO_ROOT_USER=${credentials.accessKeyId}`,
       "--env",
       `MINIO_ROOT_PASSWORD=${credentials.secretAccessKey}`,
-      "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+      "quay.io/thanos/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
       "server",
       "/data",
     ],
