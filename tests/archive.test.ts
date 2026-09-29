@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pack, unpack, digest } from "../src/archive.js";
 import { CompressionMethod } from "../src/archive.js";
@@ -35,6 +35,39 @@ it("does not create an archive when no files match", async () => {
     expect(
       await pack(directory, [path.join(directory, "missing")], CompressionMethod.Gzip),
     ).toBeUndefined();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("round trips three hard links to each file outside the workspace", async () => {
+  const directory = await mkdtemp(path.join(process.cwd(), "archive-test-"));
+  const workspace = path.join(directory, "workspace");
+  const cache = path.join(directory, "tools");
+  const output = path.join(directory, "archive");
+  const contents = Buffer.alloc(1024 * 1024, 42);
+  try {
+    await mkdir(workspace);
+    await mkdir(cache);
+    await mkdir(output);
+    vi.stubEnv("GITHUB_WORKSPACE", workspace);
+    for (let index = 0; index < 4; index++) {
+      const tool = path.join(cache, String(index));
+      await mkdir(tool);
+      await writeFile(path.join(tool, "pnpm"), contents);
+      await link(path.join(tool, "pnpm"), path.join(tool, "pnpx"));
+      await link(path.join(tool, "pnpm"), path.join(tool, "pnx"));
+    }
+    const file = await pack(output, [cache], CompressionMethod.Zstd);
+    expect(file).toBeDefined();
+    await rm(cache, { recursive: true });
+    await unpack(file!, CompressionMethod.Zstd);
+    for (let index = 0; index < 4; index++) {
+      for (const name of ["pnpm", "pnpx", "pnx"]) {
+        const restored = await readFile(path.join(cache, String(index), name));
+        expect(restored.equals(contents)).toBe(true);
+      }
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
