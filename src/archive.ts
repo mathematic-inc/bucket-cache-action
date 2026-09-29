@@ -45,6 +45,9 @@ export async function pack(
         preservePaths: true,
         portable: true,
         follow: false,
+        // Concurrent packing can stall on three hard links outside cwd, as in
+        // pnpm's tool directory. Process one entry at a time to avoid that race.
+        jobs: 1,
         noDirRecurse: true,
         strict: true,
       },
