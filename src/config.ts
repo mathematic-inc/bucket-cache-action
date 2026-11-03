@@ -47,6 +47,7 @@ export const configSchema = z
     role: z
       .string()
       .refine((value) => !value || /^arn:aws(?:-[a-z0-9-]+)?:iam::\d{12}:role\/.+$/.test(value)),
+    credentialsEnvPrefix: z.string().regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/),
     audience: z.string().min(1),
     paths: z.array(z.string().min(1)).min(1),
     key,
@@ -57,6 +58,7 @@ export const configSchema = z
     failOnMiss: z.boolean(),
     failOnError: z.boolean(),
     timeoutSeconds: z.number().int().min(1).max(14400),
+    connectTimeoutSeconds: z.number().int().min(1).max(300).optional(),
     concurrency: z.number().int().min(1).max(32),
     partSize: z
       .number()
@@ -87,10 +89,21 @@ export const configSchema = z
         path: ["region"],
         message: "S3 requires a region",
       });
-    if (config.provider === "gcs" && (config.role || config.forcePathStyle))
+    if (
+      config.provider === "gcs" &&
+      (config.role ||
+        config.forcePathStyle ||
+        config.credentialsEnvPrefix ||
+        config.connectTimeoutSeconds !== undefined)
+    )
       ctx.addIssue({
         code: "custom",
         message: "S3 authentication/addressing options cannot be used with GCS",
+      });
+    if (config.role && config.credentialsEnvPrefix)
+      ctx.addIssue({
+        code: "custom",
+        message: "Select role-to-assume or credentials-env-prefix, not both",
       });
     if (
       config.provider === "s3" &&
@@ -185,6 +198,7 @@ export function readConfig(input = core.getInput, env = process.env): Config {
     endpoint: input("endpoint"),
     forcePathStyle: booleanInput(input("force-path-style"), false),
     role: input("role-to-assume"),
+    credentialsEnvPrefix: input("credentials-env-prefix"),
     audience: input("audience") || "sts.amazonaws.com",
     paths: lines("path"),
     key: input("key"),
@@ -195,6 +209,9 @@ export function readConfig(input = core.getInput, env = process.env): Config {
     failOnMiss: booleanInput(input("fail-on-cache-miss"), false),
     failOnError: booleanInput(input("fail-on-error"), false),
     timeoutSeconds: number("timeout-seconds", 600),
+    connectTimeoutSeconds: input("connect-timeout-seconds")
+      ? Number(input("connect-timeout-seconds"))
+      : undefined,
     concurrency: number("concurrency", 4),
     partSize: number("part-size-mib", 32) * 1024 ** 2,
     maxSize: number("max-size-mib", 102400) * 1024 ** 2,

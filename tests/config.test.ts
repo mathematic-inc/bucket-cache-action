@@ -52,6 +52,32 @@ describe("cache configuration", () => {
       config({ endpoint: "http://127.0.0.1:9000", "force-path-style": "true" }).forcePathStyle,
     ).toBe(true);
   });
+  it("takes static S3 credentials from an environment prefix, never with a role or GCS", () => {
+    expect(config({ "credentials-env-prefix": "RUNNER_S3" }).credentialsEnvPrefix).toBe(
+      "RUNNER_S3",
+    );
+    expect(config().credentialsEnvPrefix).toBe("");
+    expect(() => config({ "credentials-env-prefix": "RUNNER-S3" })).toThrow();
+    expect(() => config({ "credentials-env-prefix": "3RUNNER" })).toThrow();
+    expect(() =>
+      config({
+        "credentials-env-prefix": "RUNNER_S3",
+        "role-to-assume": "arn:aws:iam::123456789012:role/cache",
+      }),
+    ).toThrow();
+    expect(config({ provider: "gcs", region: "" }).provider).toBe("gcs");
+    expect(() =>
+      config({ provider: "gcs", region: "", "credentials-env-prefix": "RUNNER_S3" }),
+    ).toThrow();
+  });
+  it("defaults the connect timeout and bounds it, for S3 only", () => {
+    expect(config().connectTimeoutSeconds).toBeUndefined();
+    expect(config({ "connect-timeout-seconds": "5" }).connectTimeoutSeconds).toBe(5);
+    expect(() => config({ provider: "gcs", region: "", "connect-timeout-seconds": "5" })).toThrow();
+  });
+  it.each(["0", "301", "1.5", "NaN"])("bounds the connect timeout %s", (value) => {
+    expect(() => config({ "connect-timeout-seconds": value })).toThrow();
+  });
   it("separates platforms, architectures, paths, and compression", () => {
     const c = config();
     const values = [

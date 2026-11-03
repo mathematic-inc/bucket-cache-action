@@ -26,6 +26,10 @@ inputs:
   audience:
     description: Audience for GitHub OIDC tokens.
     default: sts.amazonaws.com
+  credentials-env-prefix:
+    description: Optional environment variable prefix for static S3 credentials, read
+      in each phase from <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and the
+      optional <prefix>_SESSION_TOKEN. Cannot be combined with role-to-assume.
   endpoint:
     description: Optional HTTP(S) API endpoint without embedded credentials.
       Defaults to the selected cloud provider.
@@ -39,6 +43,9 @@ inputs:
   timeout-seconds:
     description: Deadline for each bucket restore or upload operation.
     default: "600"
+  connect-timeout-seconds:
+    description: Deadline for opening each connection to the bucket; defaults to 10. S3
+      only.
   concurrency:
     description: Parallel upload parts and download ranges, between 1 and 32.
     default: "4"

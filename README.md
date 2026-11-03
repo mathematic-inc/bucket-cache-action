@@ -61,8 +61,29 @@ in each phase. The AWS SDK refreshes expiring credentials during transfers. This
 supports long jobs and jobs that switch to a deployment role after restoring
 the cache. The role must trust the job's actual GitHub OIDC subject and audience.
 
-Without `role-to-assume`, the AWS SDK uses its normal credential provider chain.
-In that mode, credentials must still be available to the post step. A later
+With `credentials-env-prefix`, the action reads static credentials in each
+phase from `<prefix>_ACCESS_KEY_ID`, `<prefix>_SECRET_ACCESS_KEY` and, when it is
+set, `<prefix>_SESSION_TOKEN`, as a self-hosted runner's environment may hold
+them under other names than AWS's. No `AWS_*` credential is read or set, so later
+steps keep their own, and the values are masked. A missing key ID or secret is a
+storage error, never a reason to sign with other credentials.
+
+```yaml
+- uses: mathematic-inc/bucket-cache-action@v1.0.0
+  with:
+    bucket: my-office-cache
+    region: us-east-1
+    endpoint: https://s3.office.example.com:9000
+    force-path-style: true
+    credentials-env-prefix: OFFICE_S3
+    connect-timeout-seconds: 5
+    path: ~/.cache/pnpm
+    key: pnpm/${{ runner.os }}-${{ runner.arch }}/${{ hashFiles('pnpm-lock.yaml') }}
+```
+
+Without `role-to-assume` or `credentials-env-prefix`, the AWS SDK uses its normal
+credential provider chain. In that mode, credentials must still be available to
+the post step. A later
 `configure-aws-credentials` call or cleanup can change the job environment;
 prefer the action's OIDC mode for jobs that switch roles. The action never clears
 or exports AWS environment variables, and never stores credentials or OIDC
@@ -113,6 +134,7 @@ cannot be combined with credentials. Production GCS always uses authentication.
 | `prefix`                     | `cache`                          | Root object prefix.                                                                                                                         |
 | `role-to-assume`             | Empty                            | IAM role to assume with GitHub OIDC in each phase.                                                                                          |
 | `audience`                   | `sts.amazonaws.com`              | OIDC audience.                                                                                                                              |
+| `credentials-env-prefix`     | Empty                            | Read static S3 credentials in each phase from `<prefix>_ACCESS_KEY_ID`, `<prefix>_SECRET_ACCESS_KEY` and `<prefix>_SESSION_TOKEN`.          |
 | `endpoint`                   | AWS S3                           | HTTP(S) API endpoint without credentials, query, or fragment.                                                                               |
 | `force-path-style`           | `false`                          | Use path-style addressing for S3-compatible services.                                                                                       |
 | `workload-identity-provider` | Empty                            | GCS Workload Identity Federation provider resource name.                                                                                    |
@@ -124,6 +146,7 @@ cannot be combined with credentials. Production GCS always uses authentication.
 | `fail-on-cache-miss`         | `false`                          | Fail if no key matches.                                                                                                                     |
 | `fail-on-error`              | `false`                          | Fail on cache I/O errors instead of warning. Configuration errors always fail.                                                              |
 | `timeout-seconds`            | `600`                            | Deadline for bucket restore or upload operations. Local archive creation/extraction is outside this transfer deadline.                      |
+| `connect-timeout-seconds`    | `10`                             | Deadline for opening each S3 connection, from 1 to 300.                                                                                     |
 | `concurrency`                | `4`                              | Parallel S3 upload parts and download ranges for both providers, from 1 to 32.                                                              |
 | `part-size-mib`              | `32`                             | S3 upload part, GCS upload chunk, and download range size, from 5 to 512 MiB. Uploads increase it if necessary to stay within 10,000 parts. |
 | `max-size-mib`               | `102400`                         | Maximum compressed archive size.                                                                                                            |
