@@ -231,8 +231,11 @@ cannot be combined with credentials. Production GCS always uses authentication.
 | `max-size-mib`               | `102400`                         | Maximum compressed archive size.                                                                                                            |
 
 Outputs are `cache-hit` (`true` only for an exact match), `cache-primary-key`,
-`cache-matched-key` (empty on a miss), and `tier`, the name of the tier the match
-came from (`default` for the single-bucket inputs; empty on a miss). A fallback restore has `cache-hit: false`.
+`cache-matched-key` (empty on a miss), `tier`, the name of the tier the match
+came from (`default` for the single-bucket inputs; empty on a miss), and
+`first-tier`, the name of the hottest tier that was present and answered, hit or
+miss (empty when none did), for a tool that takes one bucket, such as a compiler
+cache, to use the same one. A fallback restore has `cache-hit: false`.
 `lookup-only` reports whether a key exists without validating the archived bytes.
 
 `mathematic-inc/bucket-cache-action/restore@v1.2.0` restores without registering a post

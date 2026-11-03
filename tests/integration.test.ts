@@ -331,6 +331,7 @@ describe("real S3 transfers and packaged action", () => {
     expect(hit.code, hit.log).toBe(0);
     expect(hit.outputs["cache-hit"]).toBe("true");
     expect(hit.outputs.tier).toBe("default");
+    expect(hit.outputs["first-tier"]).toBe("default");
     expect(hit.log).not.toContain("tier");
     expect(await readFile(path.join(work, "cache", "tool"), "utf8")).toBe("installed tool");
     expect((await stat(path.join(work, "cache", "tool"))).mode & 0o777).toBe(0o755);

@@ -87,6 +87,11 @@ class Tiers {
     core.warning(`Tier ${open.tier.name} skipped: ${error.message}`);
     this.passed.add(open);
   }
+  // The hottest tier that answered: restoring asks each tier hotter than a match
+  // before it, so the first one not passed over has answered.
+  first(): Open | undefined {
+    return this.open.find((open) => !this.passed.has(open));
+  }
 
   // Restoring: the exact key in each tier, hot to cold, then the first restore
   // key in each tier, then the second, so a more specific key beats a hotter
@@ -130,6 +135,7 @@ export async function restore(registerPost: boolean): Promise<void> {
   core.setOutput("cache-hit", "false");
   core.setOutput("cache-matched-key", "");
   core.setOutput("tier", "");
+  core.setOutput("first-tier", "");
   const config = configuration();
   if (!config) return;
   core.setOutput("cache-primary-key", config.key);
@@ -141,6 +147,7 @@ export async function restore(registerPost: boolean): Promise<void> {
     tiers = new Tiers(config, prefix);
     const signal = AbortSignal.timeout(config.timeoutSeconds * 1000);
     const found = await tiers.find(signal);
+    core.setOutput("first-tier", tiers.first()?.tier.name || "");
     if (found && !config.lookupOnly) {
       directory = await temporaryDirectory();
       const archive = path.join(directory, "download");
