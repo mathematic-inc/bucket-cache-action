@@ -15,10 +15,10 @@ import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts
 import * as core from "@actions/core";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
-import type { Config } from "../config.js";
+import type { Config, Tier } from "../config.js";
 
 import type { Bucket, Entry, Page, Range } from "../storage.js";
-import { status } from "../errors.js";
+import { describe, status, unanswered, Unavailable } from "../errors.js";
 // Static credentials that a self-hosted runner's environment holds under
 // another prefix than AWS_, read again in each phase as the role's are fetched.
 function environmentCredentials(prefix: string) {
@@ -37,24 +37,24 @@ function environmentCredentials(prefix: string) {
   };
 }
 
-export function clientConfig(config: Config): S3ClientConfig {
+export function clientConfig(tier: Tier): S3ClientConfig {
   return {
-    region: config.region,
-    endpoint: config.endpoint || undefined,
-    forcePathStyle: config.forcePathStyle,
+    region: tier.region,
+    endpoint: tier.endpoint || undefined,
+    forcePathStyle: tier.forcePathStyle,
     maxAttempts: 3,
     requestHandler: {
-      connectionTimeout: (config.connectTimeoutSeconds ?? 10) * 1000,
+      connectionTimeout: (tier.connectTimeoutSeconds ?? 10) * 1000,
       socketTimeout: 60000,
     },
-    credentials: config.role
+    credentials: tier.role
       ? async () => {
-          const sts = new STSClient({ region: config.region, maxAttempts: 3 });
+          const sts = new STSClient({ region: tier.region, maxAttempts: 3 });
           try {
-            const token = await core.getIDToken(config.audience);
+            const token = await core.getIDToken(tier.audience);
             const result = await sts.send(
               new AssumeRoleWithWebIdentityCommand({
-                RoleArn: config.role,
+                RoleArn: tier.role,
                 RoleSessionName: `cache-${process.env.GITHUB_RUN_ID || "action"}-${process.env.GITHUB_RUN_ATTEMPT || "1"}`,
                 WebIdentityToken: token,
                 DurationSeconds: 3600,
@@ -81,31 +81,50 @@ export function clientConfig(config: Config): S3ClientConfig {
             sts.destroy();
           }
         }
-      : config.credentialsEnvPrefix
-        ? environmentCredentials(config.credentialsEnvPrefix)
+      : tier.credentialsEnvPrefix
+        ? environmentCredentials(tier.credentialsEnvPrefix)
         : undefined,
   };
 }
 
-function createClient(config: Config): S3Client {
-  return new S3Client(clientConfig(config));
-}
-
 export class S3Bucket implements Bucket {
   readonly client: S3Client;
+  // Makes a tier's first request a single time, signed as the client is.
+  private once: S3Client | undefined;
   constructor(
+    readonly tier: Tier,
     readonly config: Config,
     client?: S3Client,
   ) {
-    this.client = client || createClient(config);
+    this.client = client || new S3Client(clientConfig(tier));
   }
   close(): void {
     this.client.destroy();
+    this.once?.destroy();
   }
-  async head(key: string, signal: AbortSignal): Promise<Entry | undefined> {
+  async connect(key: string, signal: AbortSignal, once: boolean): Promise<Entry | undefined> {
     try {
-      const result = await this.client.send(
-        new HeadObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      await this.client.config.credentials();
+    } catch (error) {
+      throw new Unavailable(`Sign-in failed (${describe(error)})`, error);
+    }
+    const client = once
+      ? (this.once ??= new S3Client({
+          ...clientConfig(this.tier),
+          maxAttempts: 1,
+          credentials: this.client.config.credentials,
+        }))
+      : this.client;
+    try {
+      return await this.head(key, signal, client);
+    } catch (error) {
+      throw (!signal.aborted && unanswered(error, "No connection")) || error;
+    }
+  }
+  async head(key: string, signal: AbortSignal, client = this.client): Promise<Entry | undefined> {
+    try {
+      const result = await client.send(
+        new HeadObjectCommand({ Bucket: this.tier.bucket, Key: key }),
         { abortSignal: signal },
       );
       return {
@@ -122,7 +141,7 @@ export class S3Bucket implements Bucket {
   async list(prefix: string, token: string | undefined, signal: AbortSignal): Promise<Page> {
     const result = await this.client.send(
       new ListObjectsV2Command({
-        Bucket: this.config.bucket,
+        Bucket: this.tier.bucket,
         Prefix: prefix,
         ContinuationToken: token,
       }),
@@ -142,7 +161,7 @@ export class S3Bucket implements Bucket {
   async read(entry: Entry, start: number, end: number, signal: AbortSignal): Promise<Range> {
     const result = await this.client.send(
       new GetObjectCommand({
-        Bucket: this.config.bucket,
+        Bucket: this.tier.bucket,
         Key: entry.key,
         Range: `bytes=${start}-${end}`,
         IfMatch: entry.version,
@@ -164,7 +183,7 @@ export class S3Bucket implements Bucket {
     sha256: string,
     signal: AbortSignal,
   ): Promise<boolean> {
-    const params = { Bucket: this.config.bucket, Key: key };
+    const params = { Bucket: this.tier.bucket, Key: key };
     signal.throwIfAborted();
     if (bytes <= this.config.partSize) {
       const body = createReadStream(source);

@@ -4,8 +4,8 @@ import { openAsBlob } from "node:fs";
 import { Readable } from "node:stream";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
-import { CacheError, status } from "../errors.js";
-import type { Config } from "../config.js";
+import { CacheError, describe, status, unanswered, Unavailable } from "../errors.js";
+import type { Config, Tier } from "../config.js";
 import type { Bucket, Entry, Page, Range } from "../storage.js";
 
 const metadataSchema = z.object({
@@ -29,19 +29,22 @@ class GcsError extends CacheError {
 export class GcsBucket implements Bucket {
   readonly endpoint: URL;
   readonly auth: GoogleAuth | IdentityPoolClient | undefined;
-  constructor(readonly config: Config) {
-    this.endpoint = new URL(config.endpoint || "https://storage.googleapis.com");
+  constructor(
+    readonly tier: Tier,
+    readonly config: Config,
+  ) {
+    this.endpoint = new URL(tier.endpoint || "https://storage.googleapis.com");
     const scopes = ["https://www.googleapis.com/auth/devstorage.read_write"];
-    if (config.anonymous) this.auth = undefined;
-    else if (config.workloadIdentityProvider) {
-      const audience = `//iam.googleapis.com/${config.workloadIdentityProvider}`;
+    if (tier.anonymous) this.auth = undefined;
+    else if (tier.workloadIdentityProvider) {
+      const audience = `//iam.googleapis.com/${tier.workloadIdentityProvider}`;
       this.auth = new IdentityPoolClient({
         type: "external_account",
         audience,
         subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
         token_url: "https://sts.googleapis.com/v1/token",
-        service_account_impersonation_url: config.serviceAccount
-          ? `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${config.serviceAccount}:generateAccessToken`
+        service_account_impersonation_url: tier.serviceAccount
+          ? `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${tier.serviceAccount}:generateAccessToken`
           : undefined,
         subject_token_supplier: {
           getSubjectToken: () => core.getIDToken(audience),
@@ -50,7 +53,7 @@ export class GcsBucket implements Bucket {
       });
     } else
       this.auth = new GoogleAuth({
-        keyFilename: config.credentialsFile || undefined,
+        keyFilename: tier.credentialsFile || undefined,
         scopes,
       });
   }
@@ -58,7 +61,7 @@ export class GcsBucket implements Bucket {
   private url(key?: string, upload = false): URL {
     const prefix = upload ? "/upload/storage/v1" : "/storage/v1";
     return new URL(
-      `${prefix}/b/${encodeURIComponent(this.config.bucket)}/o${key === undefined ? "" : `/${encodeURIComponent(key)}`}`,
+      `${prefix}/b/${encodeURIComponent(this.tier.bucket)}/o${key === undefined ? "" : `/${encodeURIComponent(key)}`}`,
       this.endpoint,
     );
   }
@@ -98,8 +101,21 @@ export class GcsBucket implements Bucket {
     }
   }
 
-  async head(key: string, signal: AbortSignal): Promise<Entry | undefined> {
-    const result = await this.request(this.url(key), {}, signal, [404]);
+  async connect(key: string, signal: AbortSignal, once: boolean): Promise<Entry | undefined> {
+    try {
+      await this.auth?.getRequestHeaders(this.url(key));
+    } catch (error) {
+      throw new Unavailable(`Sign-in failed (${describe(error)})`, error);
+    }
+    try {
+      return await this.head(key, signal, !once);
+    } catch (error) {
+      throw (!signal.aborted && unanswered(error, "No connection")) || error;
+    }
+  }
+
+  async head(key: string, signal: AbortSignal, retry = true): Promise<Entry | undefined> {
+    const result = await this.request(this.url(key), {}, signal, [404], retry);
     if (result.status === 404) {
       await result.body?.cancel();
       return undefined;

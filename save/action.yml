@@ -2,12 +2,16 @@ name: Bucket cache save
 description: Save files to S3 or GCS immediately without overwriting an existing cache.
 author: Mathematic
 inputs:
+  tiers:
+    description: Ordered YAML list of buckets, hot first, in place of the
+      single-bucket inputs (provider through anonymous). Restores from the best
+      tier present and saves to every one; see the README.
   provider:
     description: "Object storage provider: s3 or gcs."
     default: s3
   bucket:
-    description: Existing bucket name in the selected provider.
-    required: true
+    description: Existing bucket name in the selected provider. Required unless
+      tiers is given.
   region:
     description: S3/STS region; defaults to AWS_REGION or AWS_DEFAULT_REGION. Not
       required for GCS.
