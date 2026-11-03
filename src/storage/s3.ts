@@ -1,6 +1,7 @@
 import { CacheError } from "../errors.js";
 import {
   S3Client,
+  type S3ClientConfig,
   HeadObjectCommand,
   ListObjectsV2Command,
   GetObjectCommand,
@@ -18,13 +19,34 @@ import type { Config } from "../config.js";
 
 import type { Bucket, Entry, Page, Range } from "../storage.js";
 import { status } from "../errors.js";
-function createClient(config: Config): S3Client {
-  return new S3Client({
+// Static credentials that a self-hosted runner's environment holds under
+// another prefix than AWS_, read again in each phase as the role's are fetched.
+function environmentCredentials(prefix: string) {
+  return async () => {
+    const accessKeyId = process.env[`${prefix}_ACCESS_KEY_ID`];
+    const secretAccessKey = process.env[`${prefix}_SECRET_ACCESS_KEY`];
+    const sessionToken = process.env[`${prefix}_SESSION_TOKEN`] || undefined;
+    if (!accessKeyId || !secretAccessKey)
+      throw new CacheError(
+        `${prefix}_ACCESS_KEY_ID and ${prefix}_SECRET_ACCESS_KEY must both be set`,
+      );
+    core.setSecret(accessKeyId);
+    core.setSecret(secretAccessKey);
+    if (sessionToken) core.setSecret(sessionToken);
+    return { accessKeyId, secretAccessKey, sessionToken };
+  };
+}
+
+export function clientConfig(config: Config): S3ClientConfig {
+  return {
     region: config.region,
     endpoint: config.endpoint || undefined,
     forcePathStyle: config.forcePathStyle,
     maxAttempts: 3,
-    requestHandler: { connectionTimeout: 10000, socketTimeout: 60000 },
+    requestHandler: {
+      connectionTimeout: (config.connectTimeoutSeconds ?? 10) * 1000,
+      socketTimeout: 60000,
+    },
     credentials: config.role
       ? async () => {
           const sts = new STSClient({ region: config.region, maxAttempts: 3 });
@@ -59,8 +81,14 @@ function createClient(config: Config): S3Client {
             sts.destroy();
           }
         }
-      : undefined,
-  });
+      : config.credentialsEnvPrefix
+        ? environmentCredentials(config.credentialsEnvPrefix)
+        : undefined,
+  };
+}
+
+function createClient(config: Config): S3Client {
+  return new S3Client(clientConfig(config));
 }
 
 export class S3Bucket implements Bucket {

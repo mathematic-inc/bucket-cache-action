@@ -70,6 +70,7 @@ async function action(
   input: Record<string, string>,
   state: Record<string, string> = {},
   work = directory,
+  overrides: NodeJS.ProcessEnv = {},
 ) {
   const id = randomUUID();
   const output = path.join(directory, `${id}.output`);
@@ -88,6 +89,7 @@ async function action(
     AWS_SESSION_TOKEN: "",
     GOOGLE_APPLICATION_CREDENTIALS: "",
     AWS_REGION: "us-east-1",
+    ...overrides,
   };
   for (const [key, value] of Object.entries(input))
     env[`INPUT_${key.replaceAll(" ", "_").toUpperCase()}`] = value;
@@ -296,6 +298,39 @@ describe("real S3 transfers and packaged action", () => {
     expect(await readlink(path.join(work, "cache", "link"))).toBe("tool");
     const skipped = await action("index", { ...input, "save-if": "true" }, hit.state, work);
     expect(skipped.log).toContain("Skipping cache save: exact hit");
+  }, 60000);
+  it("signs both phases with credentials the runner's environment holds under a prefix", async () => {
+    const work = path.join(directory, "prefixed");
+    await mkdir(work);
+    const input = { ...values("prefixed-credentials"), "credentials-env-prefix": "RUNNER_S3" };
+    const environment = {
+      AWS_ACCESS_KEY_ID: "deployment-access",
+      AWS_SECRET_ACCESS_KEY: "deployment-secret",
+      RUNNER_S3_ACCESS_KEY_ID: credentials.accessKeyId,
+      RUNNER_S3_SECRET_ACCESS_KEY: credentials.secretAccessKey,
+    };
+    const restored = await action("index", input, {}, work, environment);
+    expect(restored.code, restored.log).toBe(0);
+    expect(restored.log).toContain("Bucket cache miss");
+    await mkdir(path.join(work, "cache"));
+    await writeFile(path.join(work, "cache", "tool"), "installed tool");
+    const saved = await action(
+      "index",
+      { ...input, "save-if": "true" },
+      restored.state,
+      work,
+      environment,
+    );
+    expect(saved.code, saved.log).toBe(0);
+    expect(saved.log).toContain("Bucket cache saved");
+    const unset = await action("index", { ...input, "fail-on-error": "false" }, {}, work, {
+      ...environment,
+      RUNNER_S3_SECRET_ACCESS_KEY: "",
+    });
+    expect(unset.code, unset.log).toBe(0);
+    expect(unset.log).toContain(
+      "RUNNER_S3_ACCESS_KEY_ID and RUNNER_S3_SECRET_ACCESS_KEY must both be set",
+    );
   }, 60000);
   it("does not save when the final save-if expression is false", async () => {
     const input = values("no-post-save");
