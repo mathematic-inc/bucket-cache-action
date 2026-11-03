@@ -298,6 +298,21 @@ describe("tiered cache lifecycle", () => {
     expect(fixture.failure).not.toHaveBeenCalled();
     expect(fixture.outputs.tier).toBe("cold");
   });
+  it("names the hottest tier that answered, hit or miss, for tools that take one bucket", async () => {
+    tiers.cold.connect.mockResolvedValue({ key: "original", size: 1 });
+    await restore(true);
+    expect(fixture.outputs).toMatchObject({ tier: "cold", "first-tier": "hot" });
+    tiers.hot.connect.mockRejectedValue(unreachable());
+    await restore(true);
+    expect(fixture.outputs).toMatchObject({ tier: "cold", "first-tier": "cold" });
+    tiers.hot.connect.mockRejectedValue(denied());
+    tiers.cold.connect.mockResolvedValue(undefined);
+    await restore(true);
+    expect(fixture.outputs).toMatchObject({ tier: "", "first-tier": "cold" });
+    tiers.cold.connect.mockRejectedValue(unreachable());
+    await restore(true);
+    expect(fixture.outputs["first-tier"]).toBe("");
+  });
   it("fails a restore no tier could answer as a single bucket's, only with fail-on-error", async () => {
     tiers.hot.connect.mockRejectedValue(unreachable());
     tiers.cold.connect.mockRejectedValue(unreachable());
@@ -504,12 +519,14 @@ describe("one bucket, as before tiers", () => {
     expect(fixture.warning).toHaveBeenCalledWith("Bucket cache restore failed: Error");
     expect(fixture.warning).toHaveBeenCalledTimes(1);
     expect(fixture.outputs.tier).toBe("");
+    expect(fixture.outputs["first-tier"]).toBe("");
   });
   it("names its one tier default, and keeps the default's connections retried", async () => {
     fixture.tiers.default!.connect.mockResolvedValue({ key: "original", size: 1 });
     await restore(true);
     expect(fixture.tiers.default!.connect).toHaveBeenCalledWith(expect.any(AbortSignal), false);
     expect(fixture.outputs.tier).toBe("default");
+    expect(fixture.outputs["first-tier"]).toBe("default");
     expect(message(fixture.info)).toContain("Bucket cache restored (1 MiB)");
   });
 });

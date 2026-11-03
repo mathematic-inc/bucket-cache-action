@@ -93,6 +93,9 @@ outputs:
   tier:
     description: The name of the tier the match came from (default for the
       single-bucket inputs), or an empty string on a miss.
+  first-tier:
+    description: The name of the hottest tier that was present and answered, hit or
+      miss, or an empty string when none did; for tools that take one bucket.
 runs:
   using: node24
   main: ../dist/restore.cjs
