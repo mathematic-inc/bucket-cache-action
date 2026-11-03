@@ -39,7 +39,7 @@ function setup(restoreKeys = "old/\nolder/") {
     credentials: { accessKeyId: "test", secretAccessKey: "test" },
   });
   return {
-    storage: new Storage(new S3Bucket(config, client), config, "namespace/"),
+    storage: new Storage(new S3Bucket(config.tiers[0]!, config, client), config, "namespace/"),
     send: vi.spyOn(client, "send"),
   };
 }
@@ -48,17 +48,17 @@ afterEach(() => {
 });
 
 describe("S3 key selection", () => {
-  it("prefers an exact HEAD match without listing prefixes", async () => {
+  it("looks up the exact key with one HEAD, listing no prefix", async () => {
     const { storage, send } = setup();
     send.mockImplementation(async (command) => {
       expect(command).toBeInstanceOf(HeadObjectCommand);
       expect(command.input).toMatchObject({ Key: "namespace/exact" });
       return metadata;
     });
-    expect((await storage.lookup(AbortSignal.timeout(1000)))?.key).toBe("exact");
+    expect((await storage.connect(AbortSignal.timeout(1000)))?.key).toBe("exact");
     expect(send).toHaveBeenCalledTimes(1);
   });
-  it("selects the newest match across pages before considering the next prefix", async () => {
+  it("selects the newest match for a restore key across pages", async () => {
     const { storage, send } = setup();
     send.mockImplementation(async (command) => {
       if (command instanceof HeadObjectCommand) {
@@ -81,7 +81,7 @@ describe("S3 key selection", () => {
         IsTruncated: false,
       };
     });
-    expect((await storage.lookup(AbortSignal.timeout(1000)))?.key).toBe("old/newest");
+    expect((await storage.fallback("old/", AbortSignal.timeout(1000)))?.key).toBe("old/newest");
   });
   it("does not reinterpret access denied as a cache miss", async () => {
     const { storage, send } = setup();
@@ -89,7 +89,7 @@ describe("S3 key selection", () => {
       $metadata: { httpStatusCode: 403 },
     });
     send.mockRejectedValue(denied);
-    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toBe(denied);
+    await expect(storage.connect(AbortSignal.timeout(1000))).rejects.toBe(denied);
     expect(send).toHaveBeenCalledTimes(1);
   });
   it("rejects invalid pagination instead of returning a partial match", async () => {
@@ -98,12 +98,12 @@ describe("S3 key selection", () => {
       if (command instanceof HeadObjectCommand) throw missing;
       return { IsTruncated: true };
     });
-    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toThrow("pagination");
+    await expect(storage.fallback("old/", AbortSignal.timeout(1000))).rejects.toThrow("pagination");
   });
   it("rejects caches without a checksum before downloading", async () => {
     const { storage, send } = setup();
     send.mockImplementation(async () => ({ ...metadata, Metadata: {} }));
-    await expect(storage.lookup(AbortSignal.timeout(1000))).rejects.toThrow("metadata");
+    await expect(storage.connect(AbortSignal.timeout(1000))).rejects.toThrow("metadata");
   });
 });
 

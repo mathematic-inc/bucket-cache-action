@@ -12,7 +12,7 @@ reimplementing storage. Those wrappers are separate work.
 
 ## Usage
 
-The examples use the release version `v1.0.0`. Pin its full commit SHA
+The examples use the release version `v1.2.0`. Pin its full commit SHA
 for strict supply-chain policies. The `v1` tag tracks compatible 1.x releases.
 
 ```yaml
@@ -24,7 +24,7 @@ steps:
   - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     with:
       persist-credentials: false
-  - uses: mathematic-inc/bucket-cache-action@v1.0.0
+  - uses: mathematic-inc/bucket-cache-action@v1.2.0
     with:
       bucket: my-ci-cache
       region: us-east-1
@@ -69,7 +69,7 @@ steps keep their own, and the values are masked. A missing key ID or secret is a
 storage error, never a reason to sign with other credentials.
 
 ```yaml
-- uses: mathematic-inc/bucket-cache-action@v1.0.0
+- uses: mathematic-inc/bucket-cache-action@v1.2.0
   with:
     bucket: my-office-cache
     region: us-east-1
@@ -89,13 +89,91 @@ prefer the action's OIDC mode for jobs that switch roles. The action never clear
 or exports AWS environment variables, and never stores credentials or OIDC
 tokens in its restore-to-post state.
 
+### Tiers
+
+A cache can be kept in several buckets, hot first: a fast one on a self-hosted
+fleet's own network, which runners outside the fleet can't reach and which may
+be down, then a slower one in the cloud that is always there. `tiers` takes them
+as an ordered YAML list in place of the single-bucket inputs:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+
+steps:
+  - uses: mathematic-inc/bucket-cache-action@v1.2.0
+    with:
+      tiers: |
+        - name: lan
+          bucket-env: RR_S3_BUCKET
+          region-env: RR_S3_REGION
+          endpoint-env: RR_S3_ENDPOINT
+          force-path-style: true
+          credentials-env-prefix: RR_S3
+          connect-timeout-seconds: 2
+        - name: aws
+          bucket: my-ci-cache
+          region: us-east-1
+          role-to-assume: arn:aws:iam::123456789012:role/ci-cache
+      path: ~/.cache/pnpm
+      key: pnpm/${{ runner.os }}-${{ runner.arch }}/${{ hashFiles('pnpm-lock.yaml') }}
+      restore-keys: pnpm/${{ runner.os }}-${{ runner.arch }}/
+```
+
+Each tier takes the single-bucket inputs' names: a `name`; `provider`, `s3` by
+default; `bucket`, `endpoint`, and for S3 `region` and `force-path-style`; a
+sign-in, `role-to-assume` (with an optional `audience`) or
+`credentials-env-prefix` for S3, and `workload-identity-provider` (with an
+optional `service-account`), `credentials-file` or `anonymous: true` for GCS;
+`connect-timeout-seconds` for S3; and `save: false` for a tier that is only
+restored from. A tier always names its sign-in, so whether it is present is
+known; `credentials-env-prefix: AWS` reads the job's own `AWS_*` credentials.
+`bucket`, `region`, `endpoint`, `role-to-assume`, `workload-identity-provider`,
+`service-account` and `credentials-file` can instead name the runner's
+environment variable that holds them, as `bucket-env`, since a fleet sets them on
+its runners rather than in the workflow's `env` context. The list is checked
+strictly: an unknown key, a wrong type, a value given both ways, a missing one or
+a malformed one written in the list fails the step with the tier and key it
+concerns, never a value, since that is the workflow's mistake. A malformed value
+in the runner's environment is the runner's: it skips its tier with a warning
+naming the variable, never its value, or fails the step with `fail-on-error`.
+A workflow gives `tiers` or the single-bucket inputs, not both; those inputs are
+one tier named `default`, and behave as they always have.
+
+A tier is present when the runner sets every variable it names, its credential
+prefix's `_ACCESS_KEY_ID` and `_SECRET_ACCESS_KEY` among them; an absent tier is
+skipped, saying which variables aren't set. A present tier that can't sign in, or
+whose first request gets no answer, is skipped with a warning: that request is
+made once, so a tier that is down costs its `connect-timeout-seconds`. A tier
+that answers with an error is skipped with a warning too, or fails the step with
+`fail-on-error`. Skipping a tier that is absent or can't be reached never fails
+a step; when no tier is left, the step fails as one bucket's would, with a
+warning unless `fail-on-error`.
+
+Restoring looks for the exact key in each tier, hot to cold, then for the first
+restore key in each tier, then the second, and so on; the first match restores. A
+more specific key beats a less specific one in any tier: an exact hit in a cold
+tier beats a restore-key match in a hot one, and a match for the first restore
+key in a cold tier beats one for the second in a hot one. The `tier` output names
+the tier it came from.
+
+Saving writes through. At cleanup the action saves the key to every present tier
+that saves and doesn't hold it yet, all at once: a hit from a colder tier is
+promoted to the hotter ones, and the colder ones stay complete for runners that
+can't reach the hot one. After an exact hit it asks the other tiers first, and
+packs the paths only if one lacks the key. One tier's failure doesn't stop the
+others, and each tier's outcome is logged. As with one bucket, the tiers' values
+are read at restore and reused at cleanup, and their credentials are read again
+in each phase.
+
 ### Google Cloud Storage
 
 Select `provider: gcs`. Native Workload Identity Federation obtains and refreshes
 credentials in both the restore and post phases:
 
 ```yaml
-- uses: mathematic-inc/bucket-cache-action@v1.0.0
+- uses: mathematic-inc/bucket-cache-action@v1.2.0
   with:
     provider: gcs
     bucket: my-ci-cache
@@ -125,8 +203,9 @@ cannot be combined with credentials. Production GCS always uses authentication.
 
 | Input                        | Default                          | Meaning                                                                                                                                     |
 | ---------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tiers`                      | Empty                            | Ordered YAML list of buckets, hot first, in place of `provider` through `anonymous`. See [Tiers](#tiers).                                   |
 | `provider`                   | `s3`                             | `s3` or `gcs`.                                                                                                                              |
-| `bucket`                     | Required                         | Existing bucket in the selected provider.                                                                                                   |
+| `bucket`                     | Required without `tiers`         | Existing bucket in the selected provider.                                                                                                   |
 | `region`                     | AWS region environment           | S3 and STS region; not required for GCS.                                                                                                    |
 | `path`                       | Required                         | Newline-separated files, directories, or glob patterns. Supports `~` and exclusions.                                                        |
 | `key`                        | Required                         | Immutable cache key; at most 512 characters.                                                                                                |
@@ -151,12 +230,13 @@ cannot be combined with credentials. Production GCS always uses authentication.
 | `part-size-mib`              | `32`                             | S3 upload part, GCS upload chunk, and download range size, from 5 to 512 MiB. Uploads increase it if necessary to stay within 10,000 parts. |
 | `max-size-mib`               | `102400`                         | Maximum compressed archive size.                                                                                                            |
 
-Outputs are `cache-hit` (`true` only for an exact match), `cache-primary-key`, and
-`cache-matched-key` (empty on a miss). A fallback restore has `cache-hit: false`.
+Outputs are `cache-hit` (`true` only for an exact match), `cache-primary-key`,
+`cache-matched-key` (empty on a miss), and `tier`, the name of the tier the match
+came from (`default` for the single-bucket inputs; empty on a miss). A fallback restore has `cache-hit: false`.
 `lookup-only` reports whether a key exists without validating the archived bytes.
 
-`mathematic-inc/bucket-cache-action/restore@v1.0.0` restores without registering a post
-step. `mathematic-inc/bucket-cache-action/save@v1.0.0` saves immediately. These entry
+`mathematic-inc/bucket-cache-action/restore@v1.2.0` restores without registering a post
+step. `mathematic-inc/bucket-cache-action/save@v1.2.0` saves immediately. These entry
 points use the same storage and archive implementation; the save entry point
 has no lookup or `save-if` inputs.
 
@@ -186,7 +266,8 @@ The required bucket permissions are `s3:ListBucket`, `s3:GetObject`,
 `s3:PutObject`, and `s3:AbortMultipartUpload` for the permitted prefixes.
 GCS requires `storage.objects.get`, `storage.objects.list`, and
 `storage.objects.create` on the permitted namespace. Since writes never replace
-existing objects, `storage.objects.delete` is not required.
+existing objects, `storage.objects.delete` is not required. A tier with `save: false`
+is only read, so it needs no permission to write.
 
 Neither backend needs object deletion, bucket creation, or bucket policy permissions.
 The bucket owns encryption and retention policy. Configure expiration for old
@@ -229,10 +310,12 @@ npm run test:integration
 
 Unit tests cover input validation, isolation, selection/pagination, stream
 validation, and post-job policy. Archive tests run on Linux, macOS, and Windows.
-Integration tests start a disposable, digest-pinned MinIO container and a checksum-pinned GCS emulator on loopback
-with fake credentials and a temporary bind mount. They exercise multipart
+Integration tests start two disposable, digest-pinned MinIO containers, as a hot and a cold tier, and a
+checksum-pinned GCS emulator on loopback with fake credentials and temporary bind mounts. They exercise multipart
 races/cleanup, resumable GCS uploads, range downloads, and the actual bundled action across separate
-restore and post processes. No test uses a production bucket or cloud account. The GCS emulator does not
+restore and post processes, tiers among them: misses, promotion, a more specific key in the cold tier
+over a less specific one in the hot one, a hot tier that is down or whose variables are unset or
+malformed, and `save: false`. No test uses a production bucket or cloud account. The GCS emulator does not
 enforce upload generation preconditions, so request/412 conflict tests verify
 that contract separately against controlled HTTP responses. GitHub CI also tests
 the runner's actual default, disabled, and later-step-dependent post policies.

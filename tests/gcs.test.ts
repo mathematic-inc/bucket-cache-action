@@ -4,7 +4,11 @@ import { IdentityPoolClient } from "google-auth-library";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { GcsBucket } from "../src/storage/gcs.js";
-import { readConfig } from "../src/config.js";
+import { readConfig, type Config } from "../src/config.js";
+import { status, Unavailable } from "../src/errors.js";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { once } from "node:events";
 vi.mock("@actions/core", () => ({
   setSecret: vi.fn(),
   getIDToken: vi.fn(async () => "test-oidc-token"),
@@ -23,6 +27,9 @@ function config(overrides: Record<string, string> = {}) {
   return readConfig((key) => values[key] || "", {
     GITHUB_REPOSITORY: "owner/repo",
   });
+}
+function bucketOf(config: Config) {
+  return new GcsBucket(config.tiers[0]!, config);
 }
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -50,13 +57,7 @@ describe("GCS contract", () => {
     vi.stubGlobal("fetch", request);
     await archive(async (file) => {
       expect(
-        await new GcsBucket(config()).upload(
-          "key",
-          file,
-          8,
-          "a".repeat(64),
-          AbortSignal.timeout(1000),
-        ),
+        await bucketOf(config()).upload("key", file, 8, "a".repeat(64), AbortSignal.timeout(1000)),
       ).toBe(false);
     });
     expect(request).toHaveBeenCalledTimes(1);
@@ -80,13 +81,7 @@ describe("GCS contract", () => {
     );
     await archive(async (file) =>
       expect(
-        await new GcsBucket(config()).upload(
-          "key",
-          file,
-          8,
-          "a".repeat(64),
-          AbortSignal.timeout(1000),
-        ),
+        await bucketOf(config()).upload("key", file, 8, "a".repeat(64), AbortSignal.timeout(1000)),
       ).toBe(false),
     );
     expect(requests).toEqual(["POST", "PUT", "DELETE"]);
@@ -118,13 +113,7 @@ describe("GCS contract", () => {
     );
     await archive(async (file) =>
       expect(
-        await new GcsBucket(config()).upload(
-          "key",
-          file,
-          8,
-          "a".repeat(64),
-          AbortSignal.timeout(5000),
-        ),
+        await bucketOf(config()).upload("key", file, 8, "a".repeat(64), AbortSignal.timeout(5000)),
       ).toBe(true),
     );
     expect(ranges).toContain("bytes */8");
@@ -143,7 +132,7 @@ describe("GCS contract", () => {
         });
       }),
     );
-    const result = await new GcsBucket(config()).read(
+    const result = await bucketOf(config()).read(
       { key: "cache/key", version: "123", size: 8, sha256: "a".repeat(64) },
       0,
       7,
@@ -174,7 +163,7 @@ describe("GCS contract", () => {
       }),
     );
     expect(
-      await new GcsBucket(config()).list("cache/tools/", "next", AbortSignal.timeout(1000)),
+      await bucketOf(config()).list("cache/tools/", "next", AbortSignal.timeout(1000)),
     ).toEqual({
       items: [
         {
@@ -187,7 +176,7 @@ describe("GCS contract", () => {
   });
   it("obtains a fresh GitHub token for the configured workload identity audience", async () => {
     const provider = "projects/123/locations/global/workloadIdentityPools/github/providers/github";
-    const bucket = new GcsBucket(
+    const bucket = bucketOf(
       config({
         anonymous: "false",
         "workload-identity-provider": provider,
@@ -203,5 +192,48 @@ describe("GCS contract", () => {
     expect(() => config({ endpoint: "https://storage.googleapis.com" })).toThrow();
     expect(() => config({ "role-to-assume": "arn:aws:iam::123456789012:role/cache" })).toThrow();
     expect(() => config({ anonymous: "false", bucket: "valid_gcs_bucket" })).not.toThrow();
+  });
+});
+
+describe("GCS tier's first request", () => {
+  async function server(statusCode: number) {
+    const listener = createServer((_request, response) => {
+      response.writeHead(statusCode);
+      response.end();
+    });
+    listener.listen(0, "127.0.0.1");
+    await once(listener, "listening");
+    return listener;
+  }
+  it("calls a tier that gives no answer unavailable, asking once", async () => {
+    const listener = await server(200);
+    const { port } = listener.address() as AddressInfo;
+    await new Promise((resolve) => listener.close(resolve));
+    const request = vi.fn(fetch);
+    vi.stubGlobal("fetch", request);
+    const error = await bucketOf(config({ endpoint: `http://127.0.0.1:${port}` }))
+      .connect("key", AbortSignal.timeout(5000), true)
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(Unavailable);
+    expect(error.message).toBe("No connection (ECONNREFUSED)");
+    expect(request).toHaveBeenCalledTimes(1);
+  }, 30000);
+  it("calls a failure to sign in unavailable, and reports a refusal", async () => {
+    const listener = await server(403);
+    try {
+      const { port } = listener.address() as AddressInfo;
+      const refused = await bucketOf(config({ endpoint: `http://127.0.0.1:${port}` }))
+        .connect("key", AbortSignal.timeout(5000), true)
+        .catch((e) => e);
+      expect(refused).not.toBeInstanceOf(Unavailable);
+      expect(status(refused)).toBe(403);
+    } finally {
+      await new Promise((resolve) => listener.close(resolve));
+    }
+    const adc = bucketOf(config({ anonymous: "false", endpoint: "" }));
+    vi.spyOn(adc.auth!, "getRequestHeaders").mockRejectedValue(new Error("no ADC"));
+    const unsigned = await adc.connect("key", AbortSignal.timeout(5000), true).catch((e) => e);
+    expect(unsigned).toBeInstanceOf(Unavailable);
+    expect(unsigned.message).toBe("Sign-in failed (Error)");
   });
 });
