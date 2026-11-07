@@ -218,6 +218,14 @@ describe("GCS tier's first request", () => {
     expect(error.message).toBe("No connection (ECONNREFUSED)");
     expect(request).toHaveBeenCalledTimes(1);
   }, 30000);
+  it("defers a missing credential file until connecting so another tier can be used", async () => {
+    const bucket = bucketOf(
+      config({ anonymous: "false", "credentials-file": "/missing-credentials.json" }),
+    );
+    await expect(bucket.connect("key", AbortSignal.timeout(5000), true)).rejects.toBeInstanceOf(
+      Unavailable,
+    );
+  });
   it("calls a failure to sign in unavailable, and reports a refusal", async () => {
     const listener = await server(403);
     try {

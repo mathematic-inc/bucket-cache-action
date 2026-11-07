@@ -1,4 +1,4 @@
-import { GoogleAuth, IdentityPoolClient } from "google-auth-library";
+import { type AuthClient, GoogleAuth, IdentityPoolClient } from "google-auth-library";
 import * as core from "@actions/core";
 import { openAsBlob } from "node:fs";
 import { Readable } from "node:stream";
@@ -7,6 +7,7 @@ import { z } from "zod";
 import { CacheError, describe, status, unanswered, Unavailable } from "../errors.js";
 import type { Config, Tier } from "../config.js";
 import type { Bucket, Entry, Page, Range } from "../storage.js";
+import { loadGoogleCredentials } from "./google-auth.js";
 
 const metadataSchema = z.object({
   name: z.string(),
@@ -29,6 +30,7 @@ class GcsError extends CacheError {
 export class GcsBucket implements Bucket {
   readonly endpoint: URL;
   readonly auth: GoogleAuth | IdentityPoolClient | undefined;
+  private credentialsAuth: Promise<AuthClient> | undefined;
   constructor(
     readonly tier: Tier,
     readonly config: Config,
@@ -51,11 +53,15 @@ export class GcsBucket implements Bucket {
         },
         scopes,
       });
-    } else
-      this.auth = new GoogleAuth({
-        keyFilename: tier.credentialsFile || undefined,
-        scopes,
-      });
+    } else if (!tier.credentialsFile) this.auth = new GoogleAuth({ scopes });
+  }
+
+  private getAuth(): GoogleAuth | AuthClient | Promise<AuthClient> | undefined {
+    if (this.tier.credentialsFile && !this.tier.anonymous && !this.tier.workloadIdentityProvider)
+      return (this.credentialsAuth ??= loadGoogleCredentials(this.tier.credentialsFile, [
+        "https://www.googleapis.com/auth/devstorage.read_write",
+      ]));
+    return this.auth;
   }
 
   private url(key?: string, upload = false): URL {
@@ -78,7 +84,8 @@ export class GcsBucket implements Bucket {
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted();
       const headers = new Headers(init.headers);
-      const authHeaders = await this.auth?.getRequestHeaders(url);
+      const auth = await this.getAuth();
+      const authHeaders = await auth?.getRequestHeaders(url);
       authHeaders?.forEach((value, name) => headers.set(name, value));
       let response: Response;
       try {
@@ -103,7 +110,8 @@ export class GcsBucket implements Bucket {
 
   async connect(key: string, signal: AbortSignal, once: boolean): Promise<Entry | undefined> {
     try {
-      await this.auth?.getRequestHeaders(this.url(key));
+      const auth = await this.getAuth();
+      await auth?.getRequestHeaders(this.url(key));
     } catch (error) {
       throw new Unavailable(`Sign-in failed (${describe(error)})`, error);
     }

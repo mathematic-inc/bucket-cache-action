@@ -79,7 +79,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
-@aws-sdk/checksums@3.1001.0
+@aws-sdk/checksums@3.1002.3
 ========================================================================
                                 Apache License
                            Version 2.0, January 2004
@@ -285,7 +285,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ========================================================================
-@aws-sdk/client-s3@3.1131.0
+@aws-sdk/client-s3@3.1164.0
 ========================================================================
                                 Apache License
                            Version 2.0, January 2004
@@ -491,7 +491,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ========================================================================
-@aws-sdk/client-sts@3.1131.0
+@aws-sdk/client-sts@3.1164.0
 ========================================================================
                                 Apache License
                            Version 2.0, January 2004
@@ -697,7 +697,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ========================================================================
-@aws-sdk/core@3.978.0
+@aws-sdk/core@3.980.1
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -902,7 +902,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/credential-provider-env@3.972.71
+@aws-sdk/credential-provider-env@3.972.82
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -1107,13 +1107,13 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/credential-provider-http@3.972.73
+@aws-sdk/credential-provider-http@3.972.84
 ========================================================================
 License: Apache-2.0
-Source: https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.73
+Source: https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.84
 
 ========================================================================
-@aws-sdk/credential-provider-ini@3.973.16
+@aws-sdk/credential-provider-ini@3.973.27
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -1318,13 +1318,13 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/credential-provider-login@3.972.78
+@aws-sdk/credential-provider-login@3.972.89
 ========================================================================
 License: Apache-2.0
-Source: https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.78
+Source: https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.89
 
 ========================================================================
-@aws-sdk/credential-provider-node@3.972.83
+@aws-sdk/credential-provider-node@3.972.94
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -1529,7 +1529,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/credential-provider-process@3.972.71
+@aws-sdk/credential-provider-process@3.972.82
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -1734,7 +1734,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/credential-provider-sso@3.973.15
+@aws-sdk/credential-provider-sso@3.973.26
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -1939,7 +1939,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/credential-provider-web-identity@3.972.77
+@aws-sdk/credential-provider-web-identity@3.972.88
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -2144,7 +2144,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/middleware-sdk-s3@3.972.76
+@aws-sdk/middleware-sdk-s3@3.972.87
 ========================================================================
                                 Apache License
                            Version 2.0, January 2004
@@ -2350,13 +2350,13 @@ Apache License
 
 
 ========================================================================
-@aws-sdk/nested-clients@3.997.45
+@aws-sdk/nested-clients@3.998.1
 ========================================================================
 License: Apache-2.0
-Source: https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.997.45
+Source: https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.998.1
 
 ========================================================================
-@aws-sdk/signature-v4-multi-region@3.996.46
+@aws-sdk/signature-v4-multi-region@3.996.51
 ========================================================================
                                 Apache License
                            Version 2.0, January 2004
@@ -2562,7 +2562,7 @@ Source: https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.997.45
 
 
 ========================================================================
-@aws-sdk/token-providers@3.1129.0
+@aws-sdk/token-providers@3.1164.0
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -2767,7 +2767,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@aws-sdk/xml-builder@3.972.40
+@aws-sdk/xml-builder@3.972.42
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -3152,7 +3152,7 @@ Apache License
 
 
 ========================================================================
-@smithy/core@3.34.1
+@smithy/core@3.39.0
 ========================================================================
                                 Apache License
                            Version 2.0, January 2004
@@ -3563,7 +3563,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@smithy/node-http-handler@4.12.1
+@smithy/node-http-handler@4.14.2
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -3768,7 +3768,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@smithy/signature-v4@5.7.3
+@smithy/signature-v4@5.7.5
 ========================================================================
 Apache License
                            Version 2.0, January 2004
@@ -3973,7 +3973,7 @@ Apache License
    limitations under the License.
 
 ========================================================================
-@smithy/types@4.18.0
+@smithy/types@4.20.0
 ========================================================================
                                 Apache License
                            Version 2.0, January 2004
@@ -4265,7 +4265,7 @@ License: MIT
 Source: https://www.npmjs.com/package/bignumber.js/v/9.3.1
 
 ========================================================================
-bowser@2.14.1
+bowser@2.15.0
 ========================================================================
 Copyright 2015, Dustin Diaz (the "Original Author")
 All rights reserved.
@@ -4309,7 +4309,7 @@ Original Author, when distributed with the Software.
 
 
 ========================================================================
-brace-expansion@5.0.9
+brace-expansion@5.0.12
 ========================================================================
 MIT License
 
@@ -4671,7 +4671,7 @@ SOFTWARE.
 
 
 ========================================================================
-gaxios@7.3.1
+gaxios@8.3.2
 ========================================================================
 
                                  Apache License
@@ -4878,7 +4878,7 @@ gaxios@7.3.1
 
 
 ========================================================================
-gcp-metadata@9.0.3
+gcp-metadata@9.2.3
 ========================================================================
 
                                  Apache License
@@ -5085,7 +5085,7 @@ gcp-metadata@9.0.3
 
 
 ========================================================================
-google-auth-library@11.0.2
+google-auth-library@11.3.3
 ========================================================================
 
                                  Apache License
@@ -5292,7 +5292,7 @@ google-auth-library@11.0.2
 
 
 ========================================================================
-google-logging-utils@2.0.1
+google-logging-utils@2.1.1
 ========================================================================
 
                                  Apache License
@@ -5845,7 +5845,7 @@ THE SOFTWARE.
 
 
 ========================================================================
-undici@6.28.1
+undici@6.29.1
 ========================================================================
 MIT License
 
@@ -5916,7 +5916,7 @@ THIS SOFTWARE.
 
 
 ========================================================================
-zod@4.6.4
+zod@4.6.7
 ========================================================================
 MIT License
 
