@@ -1,6 +1,7 @@
 name: Verify bucket cache
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions: {}
@@ -68,7 +69,7 @@ jobs:
       - name: Start disposable S3
         run: |
           docker run --detach --rm --name cache-post-test --publish 127.0.0.1:9000:9000 --tmpfs /data:rw,size=64m --env MINIO_ROOT_USER=cache-test --env MINIO_ROOT_PASSWORD=cache-test-password quay.io/thanos/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/ready; then break; fi
             sleep 1
           done
