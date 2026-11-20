@@ -1,6 +1,7 @@
-import { build } from "esbuild";
 import { readFile, writeFile, readdir, access } from "node:fs/promises";
 import path from "node:path";
+
+import { build } from "esbuild";
 
 const result = await build({
   entryPoints: ["src/index.ts", "src/restore.ts", "src/save.ts"],

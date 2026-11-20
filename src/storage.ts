@@ -1,10 +1,11 @@
-import { CacheError, status } from "./errors.js";
 import { open } from "node:fs/promises";
 import type { Readable } from "node:stream";
-import type { Config, Tier } from "./config.js";
+
 import { digest, size } from "./archive.js";
-import { S3Bucket } from "./storage/s3.js";
+import type { Config, Tier } from "./config.js";
+import { CacheError, status } from "./errors.js";
 import { GcsBucket } from "./storage/gcs.js";
+import { S3Bucket } from "./storage/s3.js";
 
 export interface Entry {
   key: string;

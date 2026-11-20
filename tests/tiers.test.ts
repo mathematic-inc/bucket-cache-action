@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { readConfig } from "../src/config.js";
 import { ConfigurationError } from "../src/errors.js";
 

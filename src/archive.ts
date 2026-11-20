@@ -1,13 +1,15 @@
-import { CacheError } from "./errors.js";
-import * as glob from "@actions/glob";
-import * as tar from "tar";
+import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdtemp, mkdir, rm, stat } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createZstdCompress, createZstdDecompress, createGzip, createGunzip } from "node:zlib";
+
+import * as glob from "@actions/glob";
+import * as tar from "tar";
+
+import { CacheError } from "./errors.js";
 
 export const CompressionMethod = { Gzip: "gzip", Zstd: "zstd" } as const;
 export type CompressionMethod = (typeof CompressionMethod)[keyof typeof CompressionMethod];

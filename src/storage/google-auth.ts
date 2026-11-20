@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import {
   type AuthClient,
   ExternalAccountAuthorizedUserClient,
@@ -10,8 +12,8 @@ import {
   type JWTInput,
   UserRefreshClient,
 } from "google-auth-library";
-import { readFile } from "node:fs/promises";
 import { z } from "zod";
+
 import { CacheError } from "../errors.js";
 
 const credentialSchema = z.looseObject({

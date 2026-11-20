@@ -1,5 +1,6 @@
 import { LineCounter, parseDocument } from "yaml";
 import { z } from "zod";
+
 import { ConfigurationError } from "./errors.js";
 
 const endpoint = z.string().refine((value) => {

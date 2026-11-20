@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { CompressionMethod } from "../src/archive.js";
 import { namespace, readConfig, type Snapshot, type Tier } from "../src/config.js";
 import { Unavailable } from "../src/errors.js";

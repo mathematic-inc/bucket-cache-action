@@ -1,6 +1,9 @@
-import * as core from "@actions/core";
 import path from "node:path";
+
+import * as core from "@actions/core";
+
 import { CompressionMethod } from "./archive.js";
+import { temporaryDirectory, pack, unpack, cleanup } from "./archive.js";
 import {
   readConfig,
   namespace,
@@ -10,9 +13,8 @@ import {
   type Snapshot,
   type Tier,
 } from "./config.js";
-import { temporaryDirectory, pack, unpack, cleanup } from "./archive.js";
-import { createStorage, type Entry, type Storage } from "./storage.js";
 import { CacheError, ConfigurationError, Unavailable, describe } from "./errors.js";
+import { createStorage, type Entry, type Storage } from "./storage.js";
 
 function configuration(): Config | undefined {
   try {

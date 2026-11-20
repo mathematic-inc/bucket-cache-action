@@ -1,6 +1,8 @@
-import { afterEach, expect, it, vi } from "vitest";
 import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { afterEach, expect, it, vi } from "vitest";
+
 import { pack, unpack, digest } from "../src/archive.js";
 import { CompressionMethod } from "../src/archive.js";
 

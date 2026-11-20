@@ -1,4 +1,7 @@
-import { CacheError } from "../errors.js";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+
+import * as core from "@actions/core";
 import {
   S3Client,
   type S3ClientConfig,
@@ -12,13 +15,11 @@ import {
   AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
 import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
-import * as core from "@actions/core";
-import { createReadStream } from "node:fs";
-import { Readable } from "node:stream";
-import type { Config, Tier } from "../config.js";
 
-import type { Bucket, Entry, Page, Range } from "../storage.js";
+import type { Config, Tier } from "../config.js";
+import { CacheError } from "../errors.js";
 import { describe, status, unanswered, Unavailable } from "../errors.js";
+import type { Bucket, Entry, Page, Range } from "../storage.js";
 // Static credentials that a self-hosted runner's environment holds under
 // another prefix than AWS_, read again in each phase as the role's are fetched.
 function environmentCredentials(prefix: string) {

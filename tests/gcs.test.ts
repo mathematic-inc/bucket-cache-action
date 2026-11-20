@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import * as core from "@actions/core";
-import { IdentityPoolClient } from "google-auth-library";
+import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { GcsBucket } from "../src/storage/gcs.js";
-import { readConfig, type Config } from "../src/config.js";
-import { status, Unavailable } from "../src/errors.js";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { once } from "node:events";
+import path from "node:path";
+
+import * as core from "@actions/core";
+import { IdentityPoolClient } from "google-auth-library";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { readConfig, type Config } from "../src/config.js";
+import { status, Unavailable } from "../src/errors.js";
+import { GcsBucket } from "../src/storage/gcs.js";
 vi.mock("@actions/core", () => ({
   setSecret: vi.fn(),
   getIDToken: vi.fn(async () => "test-oidc-token"),

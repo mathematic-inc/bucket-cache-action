@@ -1,17 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import path from "node:path";
+import { Readable } from "node:stream";
+
 import {
   S3Client,
   HeadObjectCommand,
   ListObjectsV2Command,
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { readConfig } from "../src/config.js";
 import { Storage } from "../src/storage.js";
 import { S3Bucket } from "../src/storage/s3.js";
-import { readConfig } from "../src/config.js";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import path from "node:path";
-import { Readable } from "node:stream";
-import { createHash } from "node:crypto";
 
 const contents = Buffer.from("verified archive");
 const sha256 = createHash("sha256").update(contents).digest("hex");

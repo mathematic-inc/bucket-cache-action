@@ -1,8 +1,10 @@
-import { CacheError, ConfigurationError } from "./errors.js";
-import * as core from "@actions/core";
 import { createHash } from "node:crypto";
+
+import * as core from "@actions/core";
 import { z } from "zod";
+
 import { CompressionMethod } from "./archive.js";
+import { CacheError, ConfigurationError } from "./errors.js";
 import { readTiers, skippedSchema, tierSchema } from "./tiers.js";
 export type { Tier } from "./tiers.js";
 

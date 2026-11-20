@@ -1,13 +1,15 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { once } from "node:events";
+import { createServer as createHttpServer } from "node:http";
+import { createServer, type AddressInfo } from "node:net";
+
 import * as core from "@actions/core";
-import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
 import { S3Client } from "@aws-sdk/client-s3";
-import { S3Bucket, clientConfig } from "../src/storage/s3.js";
+import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
+import { afterEach, expect, it, vi } from "vitest";
+
 import { readConfig, type Config } from "../src/config.js";
 import { status, Unavailable } from "../src/errors.js";
-import { createServer, type AddressInfo } from "node:net";
-import { createServer as createHttpServer } from "node:http";
-import { once } from "node:events";
+import { S3Bucket, clientConfig } from "../src/storage/s3.js";
 vi.mock("@actions/core", () => ({
   setSecret: vi.fn(),
   getIDToken: vi.fn(async () => "test-oidc-token"),

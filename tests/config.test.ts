@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { readConfig, namespace, booleanInput, snapshotSchema } from "../src/config.js";
+
 import { CompressionMethod } from "../src/archive.js";
+import { readConfig, namespace, booleanInput, snapshotSchema } from "../src/config.js";
 import { describe as describeError, CacheError } from "../src/errors.js";
 
 function config(overrides: Record<string, string> = {}) {
