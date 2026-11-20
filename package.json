@@ -8,13 +8,13 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "npm run lint && npm run typecheck && npm run format:check",
-    "format": "oxfmt --write .",
+    "check": "hk check --all",
+    "format": "hk fix --all --step oxfmt",
+    "format:check": "hk check --all --step oxfmt",
+    "lint": "hk check --all --step oxlint",
     "test": "vitest run --exclude tests/integration.test.ts",
     "test:integration": "node scripts/setup-test-tools.mjs && vitest run tests/integration.test.ts",
-    "lint": "oxlint --type-aware --deny-warnings",
-    "typecheck": "tsc --noEmit",
-    "format:check": "oxfmt --check ."
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@actions/core": "3.0.1",
@@ -29,9 +29,7 @@
   "devDependencies": {
     "@types/node": "26.6.6",
     "esbuild": "0.28.2",
-    "oxfmt": "0.77.0",
-    "oxlint": "1.92.0",
-    "oxlint-tsgolint": "7.0.2006",
+    "oxlint-tsgolint": "7.0.2007",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   },
