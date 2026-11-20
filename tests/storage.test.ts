@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readConfig } from "../src/config.js";
 import { Storage } from "../src/storage.js";
 import { S3Bucket } from "../src/storage/s3.js";
+import { spyOnSend } from "./send.js";
 
 const contents = Buffer.from("verified archive");
 const sha256 = createHash("sha256").update(contents).digest("hex");
@@ -33,7 +34,7 @@ function setup(restoreKeys = "old/\nolder/") {
     key: "exact",
     "restore-keys": restoreKeys,
   };
-  const config = readConfig((key) => values[key] || "", {
+  const config = readConfig((key) => values[key] ?? "", {
     GITHUB_REPOSITORY: "owner/repo",
   });
   const client = new S3Client({
@@ -42,8 +43,12 @@ function setup(restoreKeys = "old/\nolder/") {
   });
   return {
     storage: new Storage(new S3Bucket(config.tiers[0]!, config, client), config, "namespace/"),
-    send: vi.spyOn(client, "send"),
+    send: spyOnSend(client),
   };
+}
+function workDirectory(): string {
+  const runnerTemp = process.env.RUNNER_TEMP ?? "";
+  return runnerTemp === "" ? process.cwd() : runnerTemp;
 }
 afterEach(() => {
   vi.restoreAllMocks();
@@ -52,36 +57,41 @@ afterEach(() => {
 describe("S3 key selection", () => {
   it("looks up the exact key with one HEAD, listing no prefix", async () => {
     const { storage, send } = setup();
-    send.mockImplementation(async (command) => {
+    send.mockImplementation((command) => {
       expect(command).toBeInstanceOf(HeadObjectCommand);
       expect(command.input).toMatchObject({ Key: "namespace/exact" });
-      return metadata;
+      return Promise.resolve(metadata);
     });
     expect((await storage.connect(AbortSignal.timeout(1000)))?.key).toBe("exact");
     expect(send).toHaveBeenCalledTimes(1);
   });
   it("selects the newest match for a restore key across pages", async () => {
     const { storage, send } = setup();
-    send.mockImplementation(async (command) => {
+    send.mockImplementation((command) => {
       if (command instanceof HeadObjectCommand) {
-        if (command.input.Key === "namespace/exact") throw missing;
+        if (command.input.Key === "namespace/exact") {
+          return Promise.reject(missing);
+        }
         expect(command.input.Key).toBe("namespace/old/newest");
-        return metadata;
+        return Promise.resolve(metadata);
       }
       expect(command).toBeInstanceOf(ListObjectsV2Command);
-      if (!(command instanceof ListObjectsV2Command)) throw new Error("unexpected command");
+      if (!(command instanceof ListObjectsV2Command)) {
+        throw new TypeError("unexpected command");
+      }
       expect(command.input.Prefix).toBe("namespace/old/");
-      if (!command.input.ContinuationToken)
-        return {
+      if (command.input.ContinuationToken === undefined) {
+        return Promise.resolve({
           Contents: [{ Key: "namespace/old/first", LastModified: new Date(1), Size: 1 }],
           IsTruncated: true,
           NextContinuationToken: "page-2",
-        };
+        });
+      }
       expect(command.input.ContinuationToken).toBe("page-2");
-      return {
+      return Promise.resolve({
         Contents: [{ Key: "namespace/old/newest", LastModified: new Date(2), Size: 1 }],
         IsTruncated: false,
-      };
+      });
     });
     expect((await storage.fallback("old/", AbortSignal.timeout(1000)))?.key).toBe("old/newest");
   });
@@ -96,15 +106,16 @@ describe("S3 key selection", () => {
   });
   it("rejects invalid pagination instead of returning a partial match", async () => {
     const { storage, send } = setup();
-    send.mockImplementation(async (command) => {
-      if (command instanceof HeadObjectCommand) throw missing;
-      return { IsTruncated: true };
-    });
+    send.mockImplementation((command) =>
+      command instanceof HeadObjectCommand
+        ? Promise.reject(missing)
+        : Promise.resolve({ IsTruncated: true }),
+    );
     await expect(storage.fallback("old/", AbortSignal.timeout(1000))).rejects.toThrow("pagination");
   });
   it("rejects caches without a checksum before downloading", async () => {
     const { storage, send } = setup();
-    send.mockImplementation(async () => ({ ...metadata, Metadata: {} }));
+    send.mockImplementation(() => Promise.resolve({ ...metadata, Metadata: {} }));
     await expect(storage.connect(AbortSignal.timeout(1000))).rejects.toThrow("metadata");
   });
 });
@@ -113,22 +124,20 @@ describe("S3 range download", () => {
   it("retries a truncated stream and verifies the complete SHA-256", async () => {
     const { storage, send } = setup();
     let attempts = 0;
-    send.mockImplementation(async (command) => {
+    send.mockImplementation((command) => {
       expect(command).toBeInstanceOf(GetObjectCommand);
       expect(command.input).toMatchObject({
         IfMatch: "etag",
         Range: `bytes=0-${contents.length - 1}`,
       });
       attempts++;
-      return {
+      return Promise.resolve({
         ContentRange: `bytes 0-${contents.length - 1}/${contents.length}`,
         ContentLength: contents.length,
         Body: Readable.from([attempts === 1 ? contents.subarray(0, 2) : contents]),
-      };
+      });
     });
-    const directory = await mkdtemp(
-      path.join(process.env.RUNNER_TEMP || process.cwd(), "range-test-"),
-    );
+    const directory = await mkdtemp(path.join(workDirectory(), "range-test-"));
     try {
       const file = path.join(directory, "cache");
       await storage.download(
@@ -144,14 +153,14 @@ describe("S3 range download", () => {
   });
   it("rejects same-length corruption before extraction", async () => {
     const { storage, send } = setup();
-    send.mockImplementation(async () => ({
-      ContentRange: `bytes 0-${contents.length - 1}/${contents.length}`,
-      ContentLength: contents.length,
-      Body: Readable.from([Buffer.alloc(contents.length)]),
-    }));
-    const directory = await mkdtemp(
-      path.join(process.env.RUNNER_TEMP || process.cwd(), "range-test-"),
+    send.mockImplementation(() =>
+      Promise.resolve({
+        ContentRange: `bytes 0-${contents.length - 1}/${contents.length}`,
+        ContentLength: contents.length,
+        Body: Readable.from([Buffer.alloc(contents.length)]),
+      }),
     );
+    const directory = await mkdtemp(path.join(workDirectory(), "range-test-"));
     try {
       await expect(
         storage.download(

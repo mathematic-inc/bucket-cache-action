@@ -5,7 +5,9 @@ import { z } from "zod";
 
 import { CompressionMethod } from "./archive.js";
 import { CacheError, ConfigurationError } from "./errors.js";
+import type { DeepReadonly } from "./readonly.js";
 import { readTiers, skippedSchema, tierSchema } from "./tiers.js";
+import { nonEmpty } from "./utils.js";
 export type { Tier } from "./tiers.js";
 
 const key = z
@@ -15,9 +17,7 @@ const key = z
   .refine(
     (value) =>
       !value.includes(",") &&
-      !Array.from(value).some(
-        (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-      ) &&
+      !Array.from(value).some((character) => character < "\u0020" || character === "\u007F") &&
       !value.startsWith("/") &&
       !value.split("/").some((part) => part === "." || part === ".."),
     "Keys must not contain control characters, commas, or traversal segments",
@@ -31,7 +31,7 @@ export const configSchema = z.object({
   key,
   restoreKeys: z.array(key).max(10),
   prefix: key,
-  repository: z.string().regex(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/),
+  repository: z.string().regex(/^[a-zA-Z0-9_.\-]+\/[a-zA-Z0-9_.\-]+$/v),
   lookupOnly: z.boolean(),
   failOnMiss: z.boolean(),
   failOnError: z.boolean(),
@@ -48,7 +48,7 @@ export const configSchema = z.object({
     .positive()
     .max(5 * 1024 ** 4),
 });
-export type Config = z.infer<typeof configSchema>;
+export type Config = DeepReadonly<z.infer<typeof configSchema>>;
 
 export const snapshotSchema = z.object({
   config: configSchema,
@@ -58,12 +58,18 @@ export const snapshotSchema = z.object({
   // The tier the match came from, empty on a miss.
   matchedTier: z.string(),
 });
-export type Snapshot = z.infer<typeof snapshotSchema>;
+export type Snapshot = DeepReadonly<z.infer<typeof snapshotSchema>>;
 
 export function booleanInput(value: string, fallback: boolean): boolean {
-  if (!value) return fallback;
-  if (value === "true") return true;
-  if (value === "false") return false;
+  if (!value) {
+    return fallback;
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
   throw new CacheError("Boolean inputs must be true or false");
 }
 
@@ -94,12 +100,12 @@ function singleTier(input: (name: string) => string, env: NodeJS.ProcessEnv) {
     provider,
     credentialsFile:
       input("credentials-file") ||
-      (provider === "gcs" ? env.GOOGLE_APPLICATION_CREDENTIALS || "" : ""),
+      (provider === "gcs" ? (nonEmpty(env.GOOGLE_APPLICATION_CREDENTIALS) ?? "") : ""),
     workloadIdentityProvider: input("workload-identity-provider"),
     serviceAccount: input("service-account"),
     anonymous: booleanInput(input("anonymous"), false),
     bucket: input("bucket"),
-    region: input("region") || env.AWS_REGION || env.AWS_DEFAULT_REGION || "",
+    region: input("region") || (nonEmpty(env.AWS_REGION) ?? nonEmpty(env.AWS_DEFAULT_REGION) ?? ""),
     endpoint: input("endpoint"),
     forcePathStyle: booleanInput(input("force-path-style"), false),
     role: input("role-to-assume"),
@@ -114,28 +120,31 @@ function singleTier(input: (name: string) => string, env: NodeJS.ProcessEnv) {
 export function readConfig(input = core.getInput, env = process.env): Config {
   const lines = (name: string) =>
     input(name)
-      .split(/\r?\n/)
+      .split(/\r?\n/v)
       .map((line) => line.trim())
       .filter(Boolean);
   const number = (name: string, fallback: number) => (input(name) ? Number(input(name)) : fallback);
   let storage: { tiers: unknown[]; skipped: unknown[] };
   if (input("tiers")) {
-    const given = Object.entries(bucketInputs)
-      .filter(([name, fallback]) => input(name) && input(name) !== fallback)
-      .map(([name]) => name);
-    if (given.length)
+    const given = Object.keys(bucketInputs).filter(
+      (name) => input(name) !== "" && input(name) !== bucketInputs[name],
+    );
+    if (given.length > 0) {
       throw new ConfigurationError(
         `Give tiers or the single-bucket inputs, not both; remove ${given.join(", ")}`,
       );
+    }
     storage = readTiers(input("tiers"), env);
-  } else storage = { tiers: [singleTier(input, env)], skipped: [] };
+  } else {
+    storage = { tiers: [singleTier(input, env)], skipped: [] };
+  }
   return configSchema.parse({
     ...storage,
     paths: lines("path"),
     key: input("key"),
     restoreKeys: lines("restore-keys"),
     prefix: input("prefix") || "cache",
-    repository: env.GITHUB_REPOSITORY || "",
+    repository: nonEmpty(env.GITHUB_REPOSITORY) ?? "",
     lookupOnly: booleanInput(input("lookup-only"), false),
     failOnMiss: booleanInput(input("fail-on-cache-miss"), false),
     failOnError: booleanInput(input("fail-on-error"), false),
@@ -159,8 +168,9 @@ export function namespace(
       JSON.stringify(["mathematic-bucket-cache-v3", config.paths, compression, platform, arch]),
     )
     .digest("hex");
-  const prefix = `${config.prefix.replace(/\/+$/, "")}/${config.repository}/${version}/`;
-  if (Buffer.byteLength(prefix + config.key) > 1024)
+  const prefix = `${config.prefix.replace(/\/+$/v, "")}/${config.repository}/${version}/`;
+  if (Buffer.byteLength(prefix + config.key) > 1024) {
     throw new CacheError("Bucket object key exceeds 1024 bytes");
+  }
   return prefix;
 }

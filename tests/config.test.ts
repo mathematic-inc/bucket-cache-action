@@ -4,7 +4,7 @@ import { CompressionMethod } from "../src/archive.js";
 import { readConfig, namespace, booleanInput, snapshotSchema } from "../src/config.js";
 import { describe as describeError, CacheError } from "../src/errors.js";
 
-function config(overrides: Record<string, string> = {}) {
+function config(overrides: Readonly<Record<string, string>> = {}) {
   const values: Record<string, string> = {
     bucket: "test-cache-bucket",
     region: "us-east-1",
@@ -12,7 +12,7 @@ function config(overrides: Record<string, string> = {}) {
     key: "pnpm/development/lock",
     ...overrides,
   };
-  return readConfig((name) => values[name] || "", {
+  return readConfig((name) => values[name] ?? "", {
     GITHUB_REPOSITORY: "owner/repository",
   });
 }
@@ -90,7 +90,7 @@ describe("cache configuration", () => {
       namespace(config({ path: "other" }), CompressionMethod.Gzip, "linux", "x64"),
     ];
     expect(new Set(values).size).toBe(values.length);
-    expect(values[0]).toMatch(/^cache\/owner\/repository\/[a-f0-9]{64}\/$/);
+    expect(values[0]).toMatch(/^cache\/owner\/repository\/[a-f0-9]{64}\/$/v);
   });
   it("keeps the storage namespace stable across exact and fallback keys", () => {
     expect(namespace(config(), CompressionMethod.Gzip)).toBe(

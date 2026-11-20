@@ -31,13 +31,16 @@ function configuration(): Config | undefined {
 
 function report(phase: string, error: unknown, fatal: boolean): void {
   const message = `Bucket cache ${phase} failed: ${describe(error)}`;
-  if (fatal) core.setFailed(message);
-  else core.warning(message);
+  if (fatal) {
+    core.setFailed(message);
+  } else {
+    core.warning(message);
+  }
 }
 
 interface Open {
-  tier: Tier;
-  storage: Storage;
+  readonly tier: Tier;
+  readonly storage: Readonly<Storage>;
 }
 // What saving came to in one tier.
 type Outcome = "saved" | "held" | "lacking";
@@ -61,15 +64,24 @@ class Tiers {
   // as on a runner outside the fleet; one whose variable holds a malformed value
   // with a warning, or failing the step with fail-on-error.
   announce(): void {
-    if (!this.several) return;
+    if (!this.several) {
+      return;
+    }
     for (const { name, reason, malformed } of this.config.skipped) {
-      if (malformed && this.config.failOnError) throw new CacheError(`Tier ${name}: ${reason}`);
-      if (malformed) core.warning(`Tier ${name} skipped: ${reason}`);
-      else core.info(`Tier ${name} skipped: ${reason}`);
+      if (malformed && this.config.failOnError) {
+        throw new CacheError(`Tier ${name}: ${reason}`);
+      }
+      if (malformed) {
+        core.warning(`Tier ${name} skipped: ${reason}`);
+      } else {
+        core.info(`Tier ${name} skipped: ${reason}`);
+      }
     }
   }
   close(): void {
-    for (const { storage } of this.open) storage.close();
+    for (const { storage } of this.open) {
+      storage.close();
+    }
   }
   // Why no tier can answer: one tier's own reason, else that none could.
   none(): CacheError {
@@ -85,8 +97,8 @@ class Tiers {
   named(open: Open, error: unknown): unknown {
     return this.several ? new CacheError(`${describe(error)} (tier ${open.tier.name})`) : error;
   }
-  skip(open: Open, error: Unavailable): void {
-    core.warning(`Tier ${open.tier.name} skipped: ${error.message}`);
+  skip(open: Open, reason: string): void {
+    core.warning(`Tier ${open.tier.name} skipped: ${reason}`);
     this.passed.add(open);
   }
   // The hottest tier that answered: restoring asks each tier hotter than a match
@@ -101,45 +113,62 @@ class Tiers {
   // than being unreachable fails the job with fail-on-error, per tier.
   async find(signal: AbortSignal): Promise<(Open & { entry: Entry }) | undefined> {
     this.announce();
-    if (!this.open.length) throw this.none();
+    if (this.open.length === 0) {
+      throw this.none();
+    }
     const attempt = async (open: Open, step: () => Promise<Entry | undefined>) => {
       try {
         return await step();
       } catch (error) {
         const unavailable = error instanceof Unavailable;
-        if (!this.several) throw unavailable ? error.cause : error;
-        if (unavailable) this.skip(open, error);
-        else if (this.config.failOnError) throw this.named(open, error);
-        else {
+        if (!this.several) {
+          throw unavailable ? error.cause : error;
+        }
+        if (unavailable) {
+          this.skip(open, error.message);
+        } else if (this.config.failOnError) {
+          throw this.named(open, error);
+        } else {
           report("restore", this.named(open, error), false);
           this.passed.add(open);
         }
-        if (this.open.every((tier) => this.passed.has(tier))) throw this.none();
+        if (this.open.every((tier) => this.passed.has(tier))) {
+          throw this.none();
+        }
         return undefined;
       }
     };
     const usable = () => this.open.filter((open) => !this.passed.has(open));
     for (const open of usable()) {
       const entry = await attempt(open, () => open.storage.connect(signal, this.several));
-      if (entry) return { ...open, entry };
+      if (entry) {
+        return { ...open, entry };
+      }
     }
-    for (const prefix of this.config.restoreKeys)
+    for (const prefix of this.config.restoreKeys) {
       for (const open of usable()) {
         const entry = await attempt(open, () => open.storage.fallback(prefix, signal));
-        if (entry) return { ...open, entry };
+        if (entry) {
+          return { ...open, entry };
+        }
       }
+    }
     return undefined;
   }
 }
 
 export async function restore(registerPost: boolean): Promise<void> {
-  if (registerPost) core.saveState("phase", "post");
+  if (registerPost) {
+    core.saveState("phase", "post");
+  }
   core.setOutput("cache-hit", "false");
   core.setOutput("cache-matched-key", "");
   core.setOutput("tier", "");
   core.setOutput("first-tier", "");
   const config = configuration();
-  if (!config) return;
+  if (!config) {
+    return;
+  }
   core.setOutput("cache-primary-key", config.key);
   let tiers: Tiers | undefined;
   let directory: string | undefined;
@@ -149,7 +178,7 @@ export async function restore(registerPost: boolean): Promise<void> {
     tiers = new Tiers(config, prefix);
     const signal = AbortSignal.timeout(config.timeoutSeconds * 1000);
     const found = await tiers.find(signal);
-    core.setOutput("first-tier", tiers.first()?.tier.name || "");
+    core.setOutput("first-tier", tiers.first()?.tier.name ?? "");
     if (found && !config.lookupOnly) {
       directory = await temporaryDirectory();
       const archive = path.join(directory, "download");
@@ -160,10 +189,12 @@ export async function restore(registerPost: boolean): Promise<void> {
         throw tiers.named(found, error);
       }
     }
-    if (!found && config.failOnMiss) throw new CacheError("No cache matched the requested keys");
+    if (!found && config.failOnMiss) {
+      throw new CacheError("No cache matched the requested keys");
+    }
     core.setOutput("cache-hit", String(found?.entry.key === config.key));
-    core.setOutput("cache-matched-key", found?.entry.key || "");
-    core.setOutput("tier", found?.tier.name || "");
+    core.setOutput("cache-matched-key", found?.entry.key ?? "");
+    core.setOutput("tier", found?.tier.name ?? "");
     core.info(
       found
         ? `Bucket cache ${config.lookupOnly ? "found" : "restored"}${tiers.in("from", found)} (${Math.ceil(found.entry.size / 1024 ** 2)} MiB)`
@@ -176,8 +207,8 @@ export async function restore(registerPost: boolean): Promise<void> {
         config,
         compression,
         namespace: prefix,
-        matchedKey: found?.entry.key || "",
-        matchedTier: found?.tier.name || "",
+        matchedKey: found?.entry.key ?? "",
+        matchedTier: found?.tier.name ?? "",
       };
       core.saveState("snapshot", JSON.stringify(snapshot));
     }
@@ -185,7 +216,9 @@ export async function restore(registerPost: boolean): Promise<void> {
     report("restore", error, config.failOnError || config.failOnMiss);
   } finally {
     tiers?.close();
-    if (directory) await cleanup(directory);
+    if (directory !== undefined) {
+      await cleanup(directory);
+    }
   }
 }
 
@@ -198,11 +231,11 @@ async function saveSnapshot(snapshot: Snapshot): Promise<void> {
   const targets = config.tiers.filter(
     (tier) => tier.save && !(exact && tier.name === snapshot.matchedTier),
   );
-  if (config.lookupOnly || (exact && !targets.length)) {
+  if (config.lookupOnly || (exact && targets.length === 0)) {
     core.info("Skipping cache save: exact hit or lookup-only mode");
     return;
   }
-  if (!targets.length && config.tiers.length) {
+  if (targets.length === 0 && config.tiers.length > 0) {
     core.info("Skipping cache save: no present tier saves");
     return;
   }
@@ -213,24 +246,33 @@ async function saveSnapshot(snapshot: Snapshot): Promise<void> {
   const settle = (open: Open, result: PromiseSettledResult<Outcome>) => {
     if (result.status === "rejected") {
       const error: unknown = result.reason;
-      if (error instanceof Unavailable && tiers.several) tiers.skip(open, error);
-      else
+      if (error instanceof Unavailable && tiers.several) {
+        tiers.skip(open, error.message);
+      } else {
         report(
           "save",
           tiers.named(open, error instanceof Unavailable ? error.cause : error),
           config.failOnError,
         );
+      }
       return undefined;
     }
-    if (result.value === "saved") core.info(`Bucket cache saved${tiers.in("to", open)}`);
-    if (result.value === "held")
+    if (result.value === "saved") {
+      core.info(`Bucket cache saved${tiers.in("to", open)}`);
+    }
+    if (result.value === "held") {
       core.info(`Bucket cache already saved by another job${tiers.in("in", open)}`);
-    if (result.value !== "lacking") held++;
+    }
+    if (result.value !== "lacking") {
+      held++;
+    }
     return result.value;
   };
   try {
     tiers.announce();
-    if (!tiers.open.length) throw tiers.none();
+    if (tiers.open.length === 0) {
+      throw tiers.none();
+    }
     let lacking = tiers.open;
     if (exact) {
       // Ask the other tiers first, and pack the paths only if one lacks the key.
@@ -241,29 +283,38 @@ async function saveSnapshot(snapshot: Snapshot): Promise<void> {
         ),
       );
       lacking = lacking.filter((open, index) => settle(open, answers[index]!) === "lacking");
-      if (!lacking.length) return;
+      if (lacking.length === 0) {
+        return;
+      }
     }
     directory = await temporaryDirectory();
     const archive = await pack(directory, config.paths, snapshot.compression);
-    if (!archive) {
+    if (archive === undefined) {
       core.info("Skipping cache save: no paths matched");
       return;
     }
     const signal = AbortSignal.timeout(config.timeoutSeconds * 1000);
     const results = await Promise.allSettled(
       lacking.map(async (open): Promise<Outcome> => {
-        if (!exact && (await open.storage.connect(signal, tiers.several))) return "held";
+        if (!exact && (await open.storage.connect(signal, tiers.several))) {
+          return "held";
+        }
         return (await open.storage.upload(config.key, archive, signal)) ? "saved" : "held";
       }),
     );
-    lacking.forEach((open, index) => settle(open, results[index]!));
-    if (!held && tiers.passed.size === tiers.open.length)
+    lacking.forEach((open, index) => {
+      settle(open, results[index]!);
+    });
+    if (!held && tiers.passed.size === tiers.open.length) {
       report("save", tiers.none(), config.failOnError);
+    }
   } catch (error) {
     report("save", error, config.failOnError);
   } finally {
     tiers.close();
-    if (directory) await cleanup(directory);
+    if (directory !== undefined) {
+      await cleanup(directory);
+    }
   }
 }
 
@@ -285,7 +336,9 @@ export async function post(): Promise<void> {
 
 export async function save(): Promise<void> {
   const config = configuration();
-  if (!config) return;
+  if (!config) {
+    return;
+  }
   const compression = CompressionMethod.Zstd;
   await saveSnapshot({
     config,

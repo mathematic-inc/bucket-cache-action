@@ -9,12 +9,12 @@ import {
   type GdchCredentialsInput,
   GoogleAuth,
   JWT,
-  type JWTInput,
   UserRefreshClient,
 } from "google-auth-library";
 import { z } from "zod";
 
 import { CacheError } from "../errors.js";
+import { isObject, nonEmpty } from "../utils.js";
 
 const credentialSchema = z.looseObject({
   type: z.enum([
@@ -27,7 +27,16 @@ const credentialSchema = z.looseObject({
   ]),
 });
 
-export async function loadGoogleCredentials(file: string, scopes: string[]): Promise<AuthClient> {
+// The library checks these options when it builds the client, so the action passes the JSON on.
+const externalAccountOptions = z.custom<ExternalAccountClientOptions>(isObject);
+const externalAccountAuthorizedUserOptions =
+  z.custom<ConstructorParameters<typeof ExternalAccountAuthorizedUserClient>[0]>(isObject);
+const gdchOptions = z.custom<GdchCredentialsInput>(isObject);
+
+export async function loadGoogleCredentials(
+  file: string,
+  scopes: readonly string[],
+): Promise<AuthClient> {
   const contents = await readFile(file, "utf8");
   let value: unknown;
   try {
@@ -39,43 +48,41 @@ export async function loadGoogleCredentials(file: string, scopes: string[]): Pro
   let client: AuthClient;
   switch (json.type) {
     case "service_account": {
-      const jwt = new JWT({ scopes });
-      jwt.fromJSON(json as JWTInput);
+      const jwt = new JWT({ scopes: [...scopes] });
+      jwt.fromJSON(json);
       client = jwt;
       break;
     }
     case "authorized_user": {
       const refresh = new UserRefreshClient();
-      refresh.fromJSON(json as JWTInput);
+      refresh.fromJSON(json);
       client = refresh;
       break;
     }
     case "external_account": {
-      const external = ExternalAccountClient.fromJSON(
-        json as unknown as ExternalAccountClientOptions,
-      );
-      if (!external) throw new CacheError("Unsupported external GCS credential configuration");
-      external.scopes = scopes;
+      const external = ExternalAccountClient.fromJSON(externalAccountOptions.parse(json));
+      if (!external) {
+        throw new CacheError("Unsupported external GCS credential configuration");
+      }
+      external.scopes = [...scopes];
       client = external;
       break;
     }
     case "impersonated_service_account":
-      client = new GoogleAuth({ scopes }).fromImpersonatedJSON(
-        json as Parameters<GoogleAuth["fromImpersonatedJSON"]>[0],
-      );
+      client = new GoogleAuth({ scopes: [...scopes] }).fromImpersonatedJSON(json);
       break;
     case "external_account_authorized_user":
       client = new ExternalAccountAuthorizedUserClient(
-        json as unknown as ConstructorParameters<typeof ExternalAccountAuthorizedUserClient>[0],
+        externalAccountAuthorizedUserOptions.parse(json),
       );
       break;
     case "gdch_service_account": {
       const gdch = new GdchClient();
-      gdch.fromJSON(json as unknown as GdchCredentialsInput);
+      gdch.fromJSON(gdchOptions.parse(json));
       client = gdch;
       break;
     }
   }
-  client.quotaProjectId = process.env.GOOGLE_CLOUD_QUOTA_PROJECT || client.quotaProjectId;
+  client.quotaProjectId = nonEmpty(process.env.GOOGLE_CLOUD_QUOTA_PROJECT) ?? client.quotaProjectId;
   return client;
 }

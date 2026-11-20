@@ -12,7 +12,6 @@ import {
   symlink,
   readlink,
 } from "node:fs/promises";
-import { createServer, type AddressInfo } from "node:net";
 import path from "node:path";
 
 import {
@@ -29,6 +28,8 @@ import { readConfig, namespace } from "../src/config.js";
 import { Storage } from "../src/storage.js";
 import { GcsBucket } from "../src/storage/gcs.js";
 import { S3Bucket } from "../src/storage/s3.js";
+import { nonEmpty } from "../src/utils.js";
+import { closedPort } from "./loopback.js";
 
 const container = `mathematic-cache-test-${randomUUID()}`;
 const coldContainer = `mathematic-cache-test-cold-${randomUUID()}`;
@@ -66,7 +67,7 @@ function values(key: string): Record<string, string> {
 }
 function store(key: string) {
   const input = values(key);
-  const config = readConfig((name) => input[name] || "", {
+  const config = readConfig((name) => input[name] ?? "", {
     GITHUB_REPOSITORY: "test/repository",
   });
   return new Storage(
@@ -78,8 +79,8 @@ function store(key: string) {
 
 async function action(
   kind: string,
-  input: Record<string, string>,
-  state: Record<string, string> = {},
+  input: Readonly<Record<string, string>>,
+  state: Readonly<Record<string, string>> = {},
   work = directory,
   overrides: NodeJS.ProcessEnv = {},
 ) {
@@ -102,28 +103,33 @@ async function action(
     AWS_REGION: "us-east-1",
     ...overrides,
   };
-  for (const [key, value] of Object.entries(input))
+  for (const [key, value] of Object.entries(input)) {
     env[`INPUT_${key.replaceAll(" ", "_").toUpperCase()}`] = value;
-  for (const [key, value] of Object.entries(state)) env[`STATE_${key}`] = value;
+  }
+  for (const [key, value] of Object.entries(state)) {
+    env[`STATE_${key}`] = value;
+  }
   const result = await new Promise<{ code: number | null; log: string }>((resolve, reject) => {
     const child = spawn(process.execPath, [path.resolve(`dist/${kind}.cjs`)], { env, cwd: work });
     let log = "";
-    child.stdout.on("data", (data) => {
+    child.stdout.on("data", (data: Buffer) => {
       log += data.toString();
     });
-    child.stderr.on("data", (data) => {
+    child.stderr.on("data", (data: Buffer) => {
       log += data.toString();
     });
     child.on("error", reject);
-    child.on("exit", (code) => resolve({ code, log }));
+    child.on("exit", (code) => {
+      resolve({ code, log });
+    });
   });
-  const parse = (text: string) =>
-    Object.fromEntries(
-      [...text.matchAll(/^([^\n]+)<<([^\n]+)\n([\s\S]*?)\n\2(?:\n|$)/gm)].map((match) => [
-        match[1],
-        match[3],
-      ]),
-    );
+  const parse = (text: string): Record<string, string> => {
+    const parsed: Record<string, string> = {};
+    for (const match of text.matchAll(/^([^\n]+)<<([^\n]+)\n([\s\S]*?)\n\2(?:\n|$)/gmv)) {
+      parsed[match[1]!] = match[3]!;
+    }
+    return parsed;
+  };
   return {
     ...result,
     outputs: parse(await readFile(output, "utf8")),
@@ -166,12 +172,20 @@ async function minio(name: string, data: string, user: string, password: string)
   const deadline = Date.now() + 20000;
   while (true) {
     try {
-      if ((await fetch(`${address}/minio/health/ready`)).ok) break;
+      if ((await fetch(`${address}/minio/health/ready`)).ok) {
+        break;
+      }
     } catch (error) {
-      if (Date.now() > deadline) throw error;
+      if (Date.now() > deadline) {
+        throw error;
+      }
     }
-    if (Date.now() > deadline) throw new Error("MinIO startup timed out");
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (Date.now() > deadline) {
+      throw new Error("MinIO startup timed out");
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
   }
   return address;
 }
@@ -208,16 +222,10 @@ beforeAll(async () => {
     credentials: coldCredentials,
   });
   await coldClient.send(new CreateBucketCommand({ Bucket: coldBucket }));
-  const listener = createServer();
-  listener.listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const address = listener.address();
-  if (!address || typeof address === "string") throw new Error("No emulator port");
-  const gcsPort = address.port;
-  await new Promise<void>((resolve) => listener.close(() => resolve()));
+  const gcsPort = await closedPort();
   gcsEndpoint = `http://127.0.0.1:${gcsPort}`;
   const binary =
-    process.env.FAKE_GCS_SERVER ||
+    nonEmpty(process.env.FAKE_GCS_SERVER) ??
     path.resolve(
       ".test-tools",
       process.platform === "win32" ? "fake-gcs-server.exe" : "fake-gcs-server",
@@ -242,21 +250,33 @@ beforeAll(async () => {
   );
   const gcsDeadline = Date.now() + 20000;
   while (true) {
-    if (gcs.exitCode !== null) throw new Error("GCS emulator exited during startup");
-    try {
-      if ((await fetch(`${gcsEndpoint}/storage/v1/b`)).ok) break;
-    } catch (error) {
-      if (Date.now() > gcsDeadline) throw error;
+    if (gcs.exitCode !== null) {
+      throw new Error("GCS emulator exited during startup");
     }
-    if (Date.now() > gcsDeadline) throw new Error("GCS emulator startup timed out");
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      if ((await fetch(`${gcsEndpoint}/storage/v1/b`)).ok) {
+        break;
+      }
+    } catch (error) {
+      if (Date.now() > gcsDeadline) {
+        throw error;
+      }
+    }
+    if (Date.now() > gcsDeadline) {
+      throw new Error("GCS emulator startup timed out");
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
   }
   const created = await fetch(`${gcsEndpoint}/storage/v1/b`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: bucket }),
   });
-  if (!created.ok) throw new Error("Could not create emulator GCS bucket");
+  if (!created.ok) {
+    throw new Error("Could not create emulator GCS bucket");
+  }
 }, 30000);
 afterAll(async () => {
   client?.destroy();
@@ -269,7 +289,9 @@ afterAll(async () => {
   try {
     execFileSync("docker", ["rm", "--force", container, coldContainer], { stdio: "ignore" });
   } finally {
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 });
 
@@ -284,13 +306,13 @@ describe("real S3 transfers and packaged action", () => {
       cache.upload("multipart", file, AbortSignal.timeout(30000)),
       cache.upload("multipart", file, AbortSignal.timeout(30000)),
     ]);
-    expect(results.sort((a, b) => Number(a) - Number(b))).toEqual([false, true]);
+    expect(results.toSorted((a, b) => Number(a) - Number(b))).toEqual([false, true]);
     const entry = await cache.connect(AbortSignal.timeout(30000));
     expect(entry).toBeDefined();
     await cache.download(entry!, restored, AbortSignal.timeout(30000));
     expect(await readFile(restored)).toEqual(content);
     expect(
-      (await client.send(new ListMultipartUploadsCommand({ Bucket: bucket }))).Uploads || [],
+      (await client.send(new ListMultipartUploadsCommand({ Bucket: bucket }))).Uploads ?? [],
     ).toEqual([]);
   }, 60000);
   it("rejects corrupt cache metadata without extracting data", async () => {
@@ -311,11 +333,9 @@ describe("real S3 transfers and packaged action", () => {
     const restored = await action("index", { ...input, "save-if": "false" }, {}, work);
     expect(restored.code, restored.log).toBe(0);
     expect(restored.outputs["cache-hit"]).toBe("false");
-    expect(
-      (await client.send(new ListObjectsV2Command({ Bucket: bucket }))).Contents?.some((object) =>
-        object.Key?.endsWith("/post-lifecycle"),
-      ),
-    ).toBe(false);
+    expect((await objectKeys(client, bucket)).some((key) => key.endsWith("/post-lifecycle"))).toBe(
+      false,
+    );
     await mkdir(path.join(work, "cache"));
     await writeFile(path.join(work, "cache", "tool"), "installed tool");
     await chmod(path.join(work, "cache", "tool"), 0o755);
@@ -405,7 +425,7 @@ function coldTier(extra = ""): string {
   credentials-env-prefix: COLD_S3
 ${extra}`;
 }
-function tiers(options: { hot?: string; cold?: string } = {}): string {
+function tiers(options: { readonly hot?: string; readonly cold?: string } = {}): string {
   return hotTier(options.hot) + coldTier(options.cold);
 }
 function fleet(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -432,10 +452,19 @@ function tiered(key: string, tierList = tiers()): Record<string, string> {
     "timeout-seconds": "30",
   };
 }
+async function objectKeys(s3: S3Client, name: string): Promise<string[]> {
+  const listed = await s3.send(new ListObjectsV2Command({ Bucket: name }));
+  const keys: string[] = [];
+  for (const object of listed.Contents ?? []) {
+    if (object.Key !== undefined) {
+      keys.push(object.Key);
+    }
+  }
+  return keys;
+}
 async function holds(tier: "hot" | "cold", key: string): Promise<boolean> {
   const [s3, name] = tier === "hot" ? [client, hotBucket] : [coldClient, coldBucket];
-  const listed = await s3.send(new ListObjectsV2Command({ Bucket: name }));
-  return (listed.Contents ?? []).some((object) => object.Key?.endsWith(`/${key}`));
+  return (await objectKeys(s3, name)).some((object) => object.endsWith(`/${key}`));
 }
 // A workspace whose cache directory holds one file, saved straight into one tier.
 async function seed(tier: "hot" | "cold", key: string, contents: string): Promise<void> {
@@ -566,12 +595,7 @@ describe("tiers, hot and cold, on two S3 servers", () => {
     );
   }, 60000);
   it("passes over the hot tier when its server is down, even with fail-on-error", async () => {
-    const listener = createServer();
-    listener.listen(0, "127.0.0.1");
-    await once(listener, "listening");
-    const { port } = listener.address() as AddressInfo;
-    await new Promise<void>((resolve) => listener.close(() => resolve()));
-    const down = fleet({ HOT_S3_ENDPOINT: `http://127.0.0.1:${port}` });
+    const down = fleet({ HOT_S3_ENDPOINT: `http://127.0.0.1:${await closedPort()}` });
     await seed("cold", "tiers-down", "while the office is down");
     const work = await workspace("tiers-down");
     const input = tiered("tiers-down");
@@ -609,9 +633,10 @@ describe("tiers, hot and cold, on two S3 servers", () => {
       expect(restored.code, restored.log).toBe(0);
       expect(restored.log).toContain(reason);
       expect(restored.log).not.toContain("::warning::");
-      const printed = restored.log.replace(/^::add-mask::.*$/gm, "");
-      for (const secret of [credentials.secretAccessKey, coldCredentials.secretAccessKey])
+      const printed = restored.log.replaceAll(/^::add-mask::.*$/gmv, "");
+      for (const secret of [credentials.secretAccessKey, coldCredentials.secretAccessKey]) {
         expect(printed).not.toContain(secret);
+      }
       expect(restored.outputs).toMatchObject({ "cache-hit": "true", tier: "cold" });
       expect(await readFile(path.join(work, "cache", "tool"), "utf8")).toBe("outside the fleet");
     }
@@ -679,7 +704,7 @@ function gcsValues(key: string): Record<string, string> {
 }
 function gcsStore(key: string) {
   const input = gcsValues(key);
-  const config = readConfig((name) => input[name] || "", {
+  const config = readConfig((name) => input[name] ?? "", {
     GITHUB_REPOSITORY: "test/repository",
   });
   return new Storage(
