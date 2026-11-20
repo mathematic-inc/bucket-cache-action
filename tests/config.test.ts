@@ -118,7 +118,8 @@ describe("cache configuration", () => {
     ).toThrow();
   });
   it("redacts arbitrary SDK exception messages", () => {
-    const error = new Error("https://secret:password@bucket?token=secret");
+    // A URL with credentials, which the SDK puts in its messages.
+    const error = new Error("https://secret:password@bucket?token=secret"); // kingfisher:ignore
     error.name = "AccessDenied";
     expect(describeError(error)).toBe("AccessDenied");
     expect(describeError(new CacheError("Cache digest does not match"))).toBe(
