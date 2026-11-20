@@ -1,6 +1,7 @@
 name: Verify bucket cache
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions: {}
@@ -8,6 +9,21 @@ concurrency:
   group: cache-ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+      - uses: mathematic-inc/toolconfig-action@1baf7b021e8bf6f0e20737753c13af0fc93c8570 # v2026.11.0
+      - run: npm ci --ignore-scripts
+      - run: hk check --all --slow --skip-step toolconfig
   verify:
     name: Verify (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -22,13 +38,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          node-version: "24"
+          install_args: node
       - run: npm ci --ignore-scripts
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run format:check
       - run: npm test
       - run: npm run build
       - run: git diff --exit-code -- dist
@@ -56,7 +69,7 @@ jobs:
       - name: Start disposable S3
         run: |
           docker run --detach --rm --name cache-post-test --publish 127.0.0.1:9000:9000 --tmpfs /data:rw,size=64m --env MINIO_ROOT_USER=cache-test --env MINIO_ROOT_PASSWORD=cache-test-password quay.io/thanos/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/ready; then break; fi
             sleep 1
           done

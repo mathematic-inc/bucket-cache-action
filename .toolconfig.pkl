@@ -1,0 +1,90 @@
+amends
+  "package://github.com/mathematic-inc/toolconfig/releases/download/v2026.11.6/toolconfig@2026.11.6#/ToolConfig.pkl"
+
+root = true
+
+toolconfig {
+  `extends` =
+    List(new Repository {
+      git = "https://github.com/mathematic-inc/toolconfig-config.git"
+      rev = "fc76ddad46c14a7b7fe03bf117a92ede11ea0dfb"
+      path = "profiles/org/.toolconfig.pkl"
+    })
+}
+
+sections {
+  ["*"] {
+    oxfmt {
+      ignorePatterns =
+        List(
+          "**/dist/**",
+          "**/gen/**",
+          "**/generated/**",
+          "**/node_modules/**",
+          "**/target/**",
+          "**/vendor/**",
+          "**/*.md",
+          "**/*.toml",
+          "package-lock.json",
+        )
+    }
+    oxlint {
+      env { node = true }
+      rules {
+        ["typescript/prefer-readonly-parameter-types"] {
+          "deny"
+          new Dynamic {
+            allow =
+              List(
+                // Platform types with methods and mutable fields.
+                new Dynamic {
+                  from = "lib"
+                  name = List("AbortSignal", "PromiseSettledResult", "RequestInit", "URL")
+                },
+                // The client that the SDK gives, and the class takes as it is.
+                new Dynamic {
+                  from = "package"
+                  package = "@aws-sdk/client-s3"
+                  name = List("S3Client")
+                },
+                // The mocks that tests read calls from.
+                new Dynamic {
+                  from = "package"
+                  package = "vitest"
+                  name = List("Mock", "MockInstance")
+                },
+                // The context that zod passes to a refinement.
+                new Dynamic {
+                  from = "package"
+                  package = "zod"
+                  name = List("$RefinementCtx")
+                },
+                // Node types with methods, streams and the environment object.
+                new Dynamic {
+                  from = "package"
+                  package = "@types/node"
+                  name =
+                    List(
+                      "Buffer",
+                      "IncomingMessage",
+                      "ProcessEnv",
+                      "Readable",
+                      "Server",
+                      "ServerResponse",
+                    )
+                },
+              )
+          }
+        }
+      }
+    }
+    // GitHub evaluates `save-if` again in the post step, after `later` and `install` ran.
+    actionlint {
+      paths {
+        [".github/workflows/ci.yml"] {
+          ignore = List("property \"(later|install)\" is not defined in object type")
+        }
+      }
+    }
+  }
+}

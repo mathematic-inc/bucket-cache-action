@@ -1,4 +1,7 @@
-import { CacheError } from "../errors.js";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+
+import * as core from "@actions/core";
 import {
   S3Client,
   type S3ClientConfig,
@@ -12,28 +15,30 @@ import {
   AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
 import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
-import * as core from "@actions/core";
-import { createReadStream } from "node:fs";
-import { Readable } from "node:stream";
-import type { Config, Tier } from "../config.js";
 
+import type { Config, Tier } from "../config.js";
+import { CacheError } from "../errors.js";
+import { describe, status, toError, unanswered, Unavailable } from "../errors.js";
 import type { Bucket, Entry, Page, Range } from "../storage.js";
-import { describe, status, unanswered, Unavailable } from "../errors.js";
+import { nonEmpty } from "../utils.js";
 // Static credentials that a self-hosted runner's environment holds under
 // another prefix than AWS_, read again in each phase as the role's are fetched.
 function environmentCredentials(prefix: string) {
-  return async () => {
-    const accessKeyId = process.env[`${prefix}_ACCESS_KEY_ID`];
-    const secretAccessKey = process.env[`${prefix}_SECRET_ACCESS_KEY`];
-    const sessionToken = process.env[`${prefix}_SESSION_TOKEN`] || undefined;
-    if (!accessKeyId || !secretAccessKey)
-      throw new CacheError(
-        `${prefix}_ACCESS_KEY_ID and ${prefix}_SECRET_ACCESS_KEY must both be set`,
+  return () => {
+    const accessKeyId = nonEmpty(process.env[`${prefix}_ACCESS_KEY_ID`]);
+    const secretAccessKey = nonEmpty(process.env[`${prefix}_SECRET_ACCESS_KEY`]);
+    const sessionToken = nonEmpty(process.env[`${prefix}_SESSION_TOKEN`]);
+    if (accessKeyId === undefined || secretAccessKey === undefined) {
+      return Promise.reject(
+        new CacheError(`${prefix}_ACCESS_KEY_ID and ${prefix}_SECRET_ACCESS_KEY must both be set`),
       );
+    }
     core.setSecret(accessKeyId);
     core.setSecret(secretAccessKey);
-    if (sessionToken) core.setSecret(sessionToken);
-    return { accessKeyId, secretAccessKey, sessionToken };
+    if (sessionToken !== undefined) {
+      core.setSecret(sessionToken);
+    }
+    return Promise.resolve({ accessKeyId, secretAccessKey, sessionToken });
   };
 }
 
@@ -55,28 +60,28 @@ export function clientConfig(tier: Tier): S3ClientConfig {
             const result = await sts.send(
               new AssumeRoleWithWebIdentityCommand({
                 RoleArn: tier.role,
-                RoleSessionName: `cache-${process.env.GITHUB_RUN_ID || "action"}-${process.env.GITHUB_RUN_ATTEMPT || "1"}`,
+                RoleSessionName: `cache-${nonEmpty(process.env.GITHUB_RUN_ID) ?? "action"}-${nonEmpty(process.env.GITHUB_RUN_ATTEMPT) ?? "1"}`,
                 WebIdentityToken: token,
                 DurationSeconds: 3600,
               }),
             );
             const credentials = result.Credentials;
+            const accessKeyId = nonEmpty(credentials?.AccessKeyId);
+            const secretAccessKey = nonEmpty(credentials?.SecretAccessKey);
+            const sessionToken = nonEmpty(credentials?.SessionToken);
+            const expiration = credentials?.Expiration;
             if (
-              !credentials?.AccessKeyId ||
-              !credentials.SecretAccessKey ||
-              !credentials.SessionToken ||
-              !credentials.Expiration
-            )
+              accessKeyId === undefined ||
+              secretAccessKey === undefined ||
+              sessionToken === undefined ||
+              expiration === undefined
+            ) {
               throw new CacheError("STS returned incomplete credentials");
-            core.setSecret(credentials.AccessKeyId);
-            core.setSecret(credentials.SecretAccessKey);
-            core.setSecret(credentials.SessionToken);
-            return {
-              accessKeyId: credentials.AccessKeyId,
-              secretAccessKey: credentials.SecretAccessKey,
-              sessionToken: credentials.SessionToken,
-              expiration: credentials.Expiration,
-            };
+            }
+            core.setSecret(accessKeyId);
+            core.setSecret(secretAccessKey);
+            core.setSecret(sessionToken);
+            return { accessKeyId, secretAccessKey, sessionToken, expiration };
           } finally {
             sts.destroy();
           }
@@ -96,7 +101,7 @@ export class S3Bucket implements Bucket {
     readonly config: Config,
     client?: S3Client,
   ) {
-    this.client = client || new S3Client(clientConfig(tier));
+    this.client = client ?? new S3Client(clientConfig(tier));
   }
   close(): void {
     this.client.destroy();
@@ -118,7 +123,7 @@ export class S3Bucket implements Bucket {
     try {
       return await this.head(key, signal, client);
     } catch (error) {
-      throw (!signal.aborted && unanswered(error, "No connection")) || error;
+      throw (signal.aborted ? undefined : unanswered(error, "No connection")) ?? error;
     }
   }
   async head(key: string, signal: AbortSignal, client = this.client): Promise<Entry | undefined> {
@@ -129,12 +134,14 @@ export class S3Bucket implements Bucket {
       );
       return {
         key,
-        size: result.ContentLength || 0,
-        version: result.ETag || "",
-        sha256: result.Metadata?.sha256 || "",
+        size: result.ContentLength ?? 0,
+        version: result.ETag ?? "",
+        sha256: result.Metadata?.sha256 ?? "",
       };
     } catch (error) {
-      if (status(error) === 404) return undefined;
+      if (status(error) === 404) {
+        return undefined;
+      }
       throw error;
     }
   }
@@ -147,16 +154,23 @@ export class S3Bucket implements Bucket {
       }),
       { abortSignal: signal },
     );
-    if (result.IsTruncated && !result.NextContinuationToken)
+    const nextToken = nonEmpty(result.NextContinuationToken);
+    if (result.IsTruncated === true && nextToken === undefined) {
       throw new CacheError("S3 returned an invalid pagination token");
-    return {
-      items: (result.Contents || []).flatMap((item) =>
-        item.Key && item.LastModified && item.Size
-          ? [{ key: item.Key, modified: item.LastModified.getTime() }]
-          : [],
-      ),
-      token: result.IsTruncated ? result.NextContinuationToken : undefined,
-    };
+    }
+    const items: { key: string; modified: number }[] = [];
+    for (const item of result.Contents ?? []) {
+      const key = nonEmpty(item.Key);
+      if (
+        key !== undefined &&
+        item.LastModified !== undefined &&
+        item.Size !== undefined &&
+        item.Size !== 0
+      ) {
+        items.push({ key, modified: item.LastModified.getTime() });
+      }
+    }
+    return { items, token: result.IsTruncated === true ? nextToken : undefined };
   }
   async read(entry: Entry, start: number, end: number, signal: AbortSignal): Promise<Range> {
     const result = await this.client.send(
@@ -168,12 +182,13 @@ export class S3Bucket implements Bucket {
       }),
       { abortSignal: signal },
     );
-    if (!(result.Body instanceof Readable))
+    if (!(result.Body instanceof Readable)) {
       throw new CacheError("S3 did not return a Node readable stream");
+    }
     return {
       body: result.Body,
-      contentRange: result.ContentRange || "",
-      length: result.ContentLength || 0,
+      contentRange: result.ContentRange ?? "",
+      length: result.ContentLength ?? 0,
     };
   }
   async upload(
@@ -200,7 +215,9 @@ export class S3Bucket implements Bucket {
         );
         return true;
       } catch (error) {
-        if (status(error) === 412) return false;
+        if (status(error) === 412) {
+          return false;
+        }
         throw error;
       } finally {
         body.destroy();
@@ -211,16 +228,19 @@ export class S3Bucket implements Bucket {
       new CreateMultipartUploadCommand({ ...params, Metadata: { sha256 } }),
       { abortSignal: signal },
     );
-    if (!created.UploadId) throw new CacheError("S3 did not return a multipart upload ID");
-    const upload = { ...params, UploadId: created.UploadId };
+    const uploadId = nonEmpty(created.UploadId);
+    if (uploadId === undefined) {
+      throw new CacheError("S3 did not return a multipart upload ID");
+    }
+    const upload = { ...params, UploadId: uploadId };
     const cancel = new AbortController();
     const combined = AbortSignal.any([signal, cancel.signal]);
     const partSize = Math.max(this.config.partSize, Math.ceil(bytes / 10000));
     const count = Math.ceil(bytes / partSize);
-    const parts: { PartNumber: number; ETag: string }[] = [];
+    const parts: { readonly PartNumber: number; readonly ETag: string }[] = [];
     let next = 0;
     let completed = false;
-    let failure: unknown;
+    let failure: Error | undefined;
     try {
       const worker = async () => {
         try {
@@ -241,11 +261,16 @@ export class S3Bucket implements Bucket {
                   }),
                   { abortSignal: combined },
                 );
-                if (!result.ETag) throw new CacheError("S3 did not return a multipart ETag");
-                parts.push({ PartNumber: index + 1, ETag: result.ETag });
+                const etag = nonEmpty(result.ETag);
+                if (etag === undefined) {
+                  throw new CacheError("S3 did not return a multipart ETag");
+                }
+                parts.push({ PartNumber: index + 1, ETag: etag });
                 break;
               } catch (error) {
-                if (combined.aborted || attempt === 2 || status(error) === 403) throw error;
+                if (combined.aborted || attempt === 2 || status(error) === 403) {
+                  throw error;
+                }
               } finally {
                 body.destroy();
               }
@@ -260,20 +285,22 @@ export class S3Bucket implements Bucket {
         Array.from({ length: Math.min(this.config.concurrency, count) }, worker),
       );
       const failure = results.find((result) => result.status === "rejected");
-      if (failure?.status === "rejected") throw failure.reason;
+      if (failure?.status === "rejected") {
+        throw failure.reason;
+      }
       await this.client.send(
         new CompleteMultipartUploadCommand({
           ...upload,
           IfNoneMatch: "*",
           MultipartUpload: {
-            Parts: parts.sort((a, b) => a.PartNumber - b.PartNumber),
+            Parts: parts.toSorted((a, b) => a.PartNumber - b.PartNumber),
           },
         }),
         { abortSignal: combined },
       );
       completed = true;
     } catch (error) {
-      failure = error;
+      failure = toError(error);
     } finally {
       if (!completed) {
         // Cleanup has its own deadline: the transfer signal may already be
@@ -283,15 +310,19 @@ export class S3Bucket implements Bucket {
             abortSignal: AbortSignal.timeout(30000),
           });
         } catch (error) {
-          if (status(error) !== 404)
-            failure = failure
-              ? new AggregateError([failure, error], "Upload and cleanup failed")
-              : error;
+          if (status(error) !== 404) {
+            failure =
+              failure === undefined
+                ? toError(error)
+                : new AggregateError([failure, error], "Upload and cleanup failed");
+          }
         }
       }
     }
-    if (failure) {
-      if (status(failure) === 412) return false;
+    if (failure !== undefined) {
+      if (status(failure) === 412) {
+        return false;
+      }
       throw failure;
     }
     return true;

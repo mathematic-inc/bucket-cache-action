@@ -1,0 +1,8 @@
+amends ".hk/org.pkl"
+
+steps {
+  ["tsc"] {
+    glob = List("**/*.ts", "package.json", "tsconfig.json")
+    check = "npm run typecheck"
+  }
+}

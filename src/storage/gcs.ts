@@ -1,18 +1,21 @@
-import { type AuthClient, GoogleAuth, IdentityPoolClient } from "google-auth-library";
-import * as core from "@actions/core";
 import { openAsBlob } from "node:fs";
 import { Readable } from "node:stream";
 import { setTimeout } from "node:timers/promises";
+
+import * as core from "@actions/core";
+import { type AuthClient, GoogleAuth, IdentityPoolClient } from "google-auth-library";
 import { z } from "zod";
-import { CacheError, describe, status, unanswered, Unavailable } from "../errors.js";
+
 import type { Config, Tier } from "../config.js";
+import { CacheError, describe, status, unanswered, Unavailable } from "../errors.js";
 import type { Bucket, Entry, Page, Range } from "../storage.js";
+import { nonEmpty } from "../utils.js";
 import { loadGoogleCredentials } from "./google-auth.js";
 
 const metadataSchema = z.object({
   name: z.string(),
-  size: z.string().regex(/^\d+$/),
-  generation: z.string().regex(/^\d+$/),
+  size: z.string().regex(/^\d+$/v),
+  generation: z.string().regex(/^\d+$/v),
   updated: z.string(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
@@ -37,8 +40,9 @@ export class GcsBucket implements Bucket {
   ) {
     this.endpoint = new URL(tier.endpoint || "https://storage.googleapis.com");
     const scopes = ["https://www.googleapis.com/auth/devstorage.read_write"];
-    if (tier.anonymous) this.auth = undefined;
-    else if (tier.workloadIdentityProvider) {
+    if (tier.anonymous) {
+      this.auth = undefined;
+    } else if (tier.workloadIdentityProvider) {
       const audience = `//iam.googleapis.com/${tier.workloadIdentityProvider}`;
       this.auth = new IdentityPoolClient({
         type: "external_account",
@@ -53,14 +57,17 @@ export class GcsBucket implements Bucket {
         },
         scopes,
       });
-    } else if (!tier.credentialsFile) this.auth = new GoogleAuth({ scopes });
+    } else if (!tier.credentialsFile) {
+      this.auth = new GoogleAuth({ scopes });
+    }
   }
 
   private getAuth(): GoogleAuth | AuthClient | Promise<AuthClient> | undefined {
-    if (this.tier.credentialsFile && !this.tier.anonymous && !this.tier.workloadIdentityProvider)
+    if (this.tier.credentialsFile && !this.tier.anonymous && !this.tier.workloadIdentityProvider) {
       return (this.credentialsAuth ??= loadGoogleCredentials(this.tier.credentialsFile, [
         "https://www.googleapis.com/auth/devstorage.read_write",
       ]));
+    }
     return this.auth;
   }
 
@@ -76,17 +83,20 @@ export class GcsBucket implements Bucket {
     url: URL,
     init: RequestInit,
     signal: AbortSignal,
-    accepted: number[] = [],
+    accepted: readonly number[] = [],
     retry = true,
   ): Promise<Response> {
-    if (url.origin !== this.endpoint.origin)
+    if (url.origin !== this.endpoint.origin) {
       throw new CacheError("GCS response tried to change the configured endpoint");
+    }
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted();
       const headers = new Headers(init.headers);
       const auth = await this.getAuth();
       const authHeaders = await auth?.getRequestHeaders(url);
-      authHeaders?.forEach((value, name) => headers.set(name, value));
+      authHeaders?.forEach((value, name) => {
+        headers.set(name, value);
+      });
       let response: Response;
       try {
         response = await fetch(url, {
@@ -96,14 +106,19 @@ export class GcsBucket implements Bucket {
           redirect: "manual",
         });
       } catch (error) {
-        if (!retry || signal.aborted || attempt === 2) throw error;
+        if (!retry || signal.aborted || attempt === 2) {
+          throw error;
+        }
         await setTimeout(250 * (attempt + 1), undefined, { signal });
         continue;
       }
-      if (response.ok || accepted.includes(response.status)) return response;
+      if (response.ok || accepted.includes(response.status)) {
+        return response;
+      }
       await response.body?.cancel();
-      if (!retry || attempt === 2 || ![408, 429, 500, 502, 503, 504].includes(response.status))
+      if (!retry || attempt === 2 || ![408, 429, 500, 502, 503, 504].includes(response.status)) {
         throw new GcsError(response.status);
+      }
       await setTimeout(250 * (attempt + 1), undefined, { signal });
     }
   }
@@ -118,7 +133,7 @@ export class GcsBucket implements Bucket {
     try {
       return await this.head(key, signal, !once);
     } catch (error) {
-      throw (!signal.aborted && unanswered(error, "No connection")) || error;
+      throw (signal.aborted ? undefined : unanswered(error, "No connection")) ?? error;
     }
   }
 
@@ -133,7 +148,7 @@ export class GcsBucket implements Bucket {
       key,
       size: Number(metadata.size),
       version: metadata.generation,
-      sha256: metadata.metadata?.sha256 || "",
+      sha256: metadata.metadata?.sha256 ?? "",
     };
   }
 
@@ -141,17 +156,18 @@ export class GcsBucket implements Bucket {
     const url = this.url();
     url.searchParams.set("prefix", prefix);
     url.searchParams.set("maxResults", "1000");
-    if (token) url.searchParams.set("pageToken", token);
+    const pageToken = nonEmpty(token);
+    if (pageToken !== undefined) {
+      url.searchParams.set("pageToken", pageToken);
+    }
     const result = listSchema.parse(await (await this.request(url, {}, signal)).json());
-    return {
-      items: (result.items || [])
-        .filter((item) => Number(item.size) > 0)
-        .map((item) => ({
-          key: item.name,
-          modified: new Date(item.updated).getTime(),
-        })),
-      token: result.nextPageToken,
-    };
+    const items: { key: string; modified: number }[] = [];
+    for (const item of result.items ?? []) {
+      if (Number(item.size) > 0) {
+        items.push({ key: item.name, modified: new Date(item.updated).getTime() });
+      }
+    }
+    return { items, token: result.nextPageToken };
   }
 
   async read(entry: Entry, start: number, end: number, signal: AbortSignal): Promise<Range> {
@@ -163,10 +179,12 @@ export class GcsBucket implements Bucket {
       { headers: { Range: `bytes=${start}-${end}` } },
       signal,
     );
-    if (!response.body) throw new CacheError("GCS did not return a response body");
+    if (!response.body) {
+      throw new CacheError("GCS did not return a response body");
+    }
     return {
       body: Readable.from(response.body),
-      contentRange: response.headers.get("content-range") || "",
+      contentRange: response.headers.get("content-range") ?? "",
       length: Number(response.headers.get("content-length")),
     };
   }
@@ -203,11 +221,14 @@ export class GcsBucket implements Bucket {
       );
       const location = created.headers.get("location");
       await created.body?.cancel();
-      if (!location) throw new CacheError("GCS did not return a resumable upload session");
+      if (location === null || location === "") {
+        throw new CacheError("GCS did not return a resumable upload session");
+      }
       session = new URL(location, this.endpoint);
       core.setSecret(session.href);
-      if (session.origin !== this.endpoint.origin)
+      if (session.origin !== this.endpoint.origin) {
         throw new CacheError("GCS upload session changed the configured endpoint");
+      }
       const file = await openAsBlob(source);
       let offset = 0;
       let stalled = 0;
@@ -234,8 +255,9 @@ export class GcsBucket implements Bucket {
             status(error) === 412 ||
             status(error) === 401 ||
             status(error) === 403
-          )
+          ) {
             throw error;
+          }
           // A lost response is ambiguous. Ask how much the server committed
           // before resuming, instead of assuming the entire chunk was lost.
           response = await this.request(
@@ -252,25 +274,31 @@ export class GcsBucket implements Bucket {
           );
         }
         if (response.ok) {
-          if (end !== bytes)
+          if (end !== bytes) {
             throw new CacheError("GCS confirmed completion before the entire archive was uploaded");
+          }
           completed = true;
           await response.body?.cancel();
           return true;
         }
         const range = response.headers.get("range");
         await response.body?.cancel();
-        const match = range && /^bytes=0-(\d+)$/.exec(range);
-        const next = match ? Number(match[1]) + 1 : 0;
-        if (next < offset || next > end || next > bytes)
+        const match = range === null ? null : /^bytes=0-(\d+)$/v.exec(range);
+        const next = match === null ? 0 : Number(match[1]) + 1;
+        if (next < offset || next > end || next > bytes) {
           throw new CacheError("GCS returned an invalid resumable upload offset");
+        }
         stalled = next === offset ? stalled + 1 : 0;
-        if (stalled >= 3) throw new CacheError("GCS resumable upload made no progress");
+        if (stalled >= 3) {
+          throw new CacheError("GCS resumable upload made no progress");
+        }
         offset = next;
       }
       throw new CacheError("GCS did not confirm upload completion");
     } catch (error) {
-      if (status(error) === 412) return false;
+      if (status(error) === 412) {
+        return false;
+      }
       throw error;
     } finally {
       if (session && !completed && session.origin === this.endpoint.origin) {

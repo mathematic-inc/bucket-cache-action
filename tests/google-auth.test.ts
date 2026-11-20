@@ -1,7 +1,9 @@
-import { IdentityPoolClient, JWT, UserRefreshClient } from "google-auth-library";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { IdentityPoolClient, JWT, UserRefreshClient } from "google-auth-library";
 import { describe, expect, it } from "vitest";
+
 import { loadGoogleCredentials } from "../src/storage/google-auth.js";
 
 async function credentialFile(contents: string, run: (file: string) => Promise<void>) {

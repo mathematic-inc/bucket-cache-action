@@ -1,18 +1,20 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+
 import * as core from "@actions/core";
-import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
 import { S3Client } from "@aws-sdk/client-s3";
-import { S3Bucket, clientConfig } from "../src/storage/s3.js";
+import { STSClient, AssumeRoleWithWebIdentityCommand } from "@aws-sdk/client-sts";
+import { afterEach, expect, it, vi } from "vitest";
+
 import { readConfig, type Config } from "../src/config.js";
 import { status, Unavailable } from "../src/errors.js";
-import { createServer, type AddressInfo } from "node:net";
-import { createServer as createHttpServer } from "node:http";
-import { once } from "node:events";
+import { S3Bucket, clientConfig } from "../src/storage/s3.js";
+import { closeServer, closedPort, listen } from "./loopback.js";
+import { spyOnSend } from "./send.js";
 vi.mock("@actions/core", () => ({
   setSecret: vi.fn(),
-  getIDToken: vi.fn(async () => "test-oidc-token"),
+  getIDToken: vi.fn(() => Promise.resolve("test-oidc-token")),
 }));
-function config(role = "", inputs: Record<string, string> = {}) {
+function config(role = "", inputs: Readonly<Record<string, string>> = {}) {
   const values: Record<string, string> = {
     provider: "s3",
     bucket: "test-cache",
@@ -22,7 +24,7 @@ function config(role = "", inputs: Record<string, string> = {}) {
     "role-to-assume": role,
     ...inputs,
   };
-  return readConfig((name) => values[name] || "", {
+  return readConfig((name) => values[name] ?? "", {
     GITHUB_REPOSITORY: "owner/repo",
   });
 }
@@ -55,21 +57,21 @@ it("uses AWS STS with a fresh GitHub identity for each phase instead of inherite
   vi.stubEnv("AWS_ACCESS_KEY_ID", "deployment-access");
   vi.stubEnv("AWS_SECRET_ACCESS_KEY", "deployment-secret");
   const role = "arn:aws:iam::123456789012:role/cache";
-  const send = vi.spyOn(STSClient.prototype, "send").mockImplementation(async (command) => {
+  const send = spyOnSend(STSClient.prototype).mockImplementation((command) => {
     expect(command).toBeInstanceOf(AssumeRoleWithWebIdentityCommand);
     expect(command.input).toMatchObject({
       RoleArn: role,
       WebIdentityToken: "test-oidc-token",
       DurationSeconds: 3600,
     });
-    return {
+    return Promise.resolve({
       Credentials: {
         AccessKeyId: "cache-access",
         SecretAccessKey: "cache-secret",
         SessionToken: "cache-session",
         Expiration: new Date(Date.now() + 3600000),
       },
-    };
+    });
   });
   for (let phase = 0; phase < 2; phase++) {
     const bucket = bucketOf(config(role));
@@ -133,27 +135,24 @@ it("gives each connection to the bucket the configured deadline", () => {
   });
 });
 
-// A loopback port nothing listens on, and a server that refuses every request.
-async function closedPort(): Promise<number> {
-  const server = createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address() as AddressInfo;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
 async function refusing(run: (endpoint: string) => Promise<void>) {
-  const server = createHttpServer((_request, response) => {
+  const server = createServer((_request, response) => {
     response.writeHead(403, { "Content-Type": "application/xml" });
     response.end("<Error><Code>AccessDenied</Code></Error>");
   });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
+  const port = await listen(server);
   try {
-    await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+    await run(`http://127.0.0.1:${port}`);
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    await closeServer(server);
   }
+}
+function sender(send: ReturnType<typeof spyOnSend>, call: number): S3Client {
+  const client = send.mock.contexts[call];
+  if (!(client instanceof S3Client)) {
+    throw new TypeError("The call did not come from an S3 client");
+  }
+  return client;
 }
 function prefixed(endpoint: string, connectTimeout = "1") {
   vi.stubEnv("RUNNER_S3_ACCESS_KEY_ID", "runner-access");
@@ -170,11 +169,14 @@ function prefixed(endpoint: string, connectTimeout = "1") {
 it("calls a tier unavailable when it can't sign in, before any request", async () => {
   const bucket = prefixed(`http://127.0.0.1:${await closedPort()}`);
   vi.stubEnv("RUNNER_S3_SECRET_ACCESS_KEY", "");
-  const send = vi.spyOn(S3Client.prototype, "send");
+  const send = spyOnSend(S3Client.prototype);
   try {
-    const error = await bucket.connect("key", AbortSignal.timeout(5000), true).catch((e) => e);
+    const error = await bucket
+      .connect("key", AbortSignal.timeout(5000), true)
+      .catch((error: unknown) => error);
     expect(error).toBeInstanceOf(Unavailable);
-    expect(error.message).toBe(
+    expect(error).toHaveProperty(
+      "message",
       "Sign-in failed (RUNNER_S3_ACCESS_KEY_ID and RUNNER_S3_SECRET_ACCESS_KEY must both be set)",
     );
     expect(send).not.toHaveBeenCalled();
@@ -185,18 +187,20 @@ it("calls a tier unavailable when it can't sign in, before any request", async (
 it("makes a tier's first request once when another tier may answer, and calls no answer unavailable", async () => {
   // Windows refuses a closed loopback port only after retrying for about two seconds.
   const bucket = prefixed(`http://127.0.0.1:${await closedPort()}`, "10");
-  const send = vi.spyOn(S3Client.prototype, "send");
+  const send = spyOnSend(S3Client.prototype);
   try {
-    const error = await bucket.connect("key", AbortSignal.timeout(20000), true).catch((e) => e);
+    const error = await bucket
+      .connect("key", AbortSignal.timeout(20000), true)
+      .catch((error: unknown) => error);
     expect(error).toBeInstanceOf(Unavailable);
-    expect(error.message).toBe("No connection (ECONNREFUSED)");
+    expect(error).toHaveProperty("message", "No connection (ECONNREFUSED)");
     expect(send).toHaveBeenCalledTimes(1);
-    expect(await (send.mock.contexts[0] as S3Client).config.maxAttempts()).toBe(1);
+    expect(await sender(send, 0).config.maxAttempts()).toBe(1);
     send.mockRejectedValueOnce(Object.assign(new Error("refused"), { code: "ECONNREFUSED" }));
     await expect(bucket.connect("key", AbortSignal.timeout(20000), false)).rejects.toThrow(
       "No connection (ECONNREFUSED)",
     );
-    expect(await (send.mock.contexts[1] as S3Client).config.maxAttempts()).toBe(3);
+    expect(await sender(send, 1).config.maxAttempts()).toBe(3);
   } finally {
     bucket.close();
   }
@@ -205,7 +209,9 @@ it("reports a tier that answers with a refusal, rather than passing it over", as
   await refusing(async (endpoint) => {
     const bucket = prefixed(endpoint);
     try {
-      const error = await bucket.connect("key", AbortSignal.timeout(5000), true).catch((e) => e);
+      const error = await bucket
+        .connect("key", AbortSignal.timeout(5000), true)
+        .catch((error: unknown) => error);
       expect(error).not.toBeInstanceOf(Unavailable);
       expect(status(error)).toBe(403);
     } finally {

@@ -1,6 +1,24 @@
-import { build } from "esbuild";
-import { readFile, writeFile, readdir, access } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { build } from "esbuild";
+import { z } from "zod";
+
+/**
+ * @typedef {{
+ *   readonly directory: string;
+ *   readonly id: string;
+ *   readonly license: string | undefined;
+ *   readonly name: string;
+ *   readonly version: string;
+ * }} Dependency
+ */
+
+const text = z
+  .string()
+  .optional()
+  .transform((value) => (value === "" ? undefined : value));
+const manifestSchema = z.looseObject({ name: text, version: text, license: text });
 
 const result = await build({
   entryPoints: ["src/index.ts", "src/restore.ts", "src/save.ts"],
@@ -15,34 +33,50 @@ const result = await build({
   metafile: true,
   logLevel: "info",
 });
-const packages = new Map();
+/** @type {Map<string, Dependency>} */
+const dependencies = new Map();
 for (const file of Object.keys(result.metafile.inputs)) {
-  if (!file.includes("node_modules/")) continue;
+  if (!file.includes("node_modules/")) {
+    continue;
+  }
   let directory = path.dirname(file);
   while (directory.includes("node_modules")) {
     try {
-      await access(path.join(directory, "package.json"));
-      const pkg = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8"));
-      if (pkg.name && pkg.version) {
-        packages.set(`${pkg.name}@${pkg.version}`, directory);
+      const manifest = manifestSchema.parse(
+        JSON.parse(await readFile(path.join(directory, "package.json"), "utf8")),
+      );
+      if (manifest.name !== undefined && manifest.version !== undefined) {
+        const id = `${manifest.name}@${manifest.version}`;
+        dependencies.set(id, {
+          directory,
+          id,
+          license: manifest.license,
+          name: manifest.name,
+          version: manifest.version,
+        });
         break;
       }
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        throw error;
+      }
     }
     directory = path.dirname(directory);
   }
 }
+/** @type {(left: Dependency, right: Dependency) => number} */
+const byId = (left, right) => left.id.localeCompare(right.id, "en");
 let notices = "Bundled third-party licenses\n";
-for (const [name, directory] of [...packages].sort(([a], [b]) => a.localeCompare(b, "en"))) {
-  notices += `\n${"=".repeat(72)}\n${name}\n${"=".repeat(72)}\n`;
+for (const { directory, id, license, name, version } of [...dependencies.values()].toSorted(byId)) {
+  notices += `\n${"=".repeat(72)}\n${id}\n${"=".repeat(72)}\n`;
   const files = (await readdir(directory))
-    .filter((file) => /^(license|copying|notice)(\.|$)/i.test(file))
-    .sort();
-  if (!files.length) {
-    const pkg = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8"));
-    notices += `License: ${pkg.license || "See package source"}\nSource: https://www.npmjs.com/package/${pkg.name}/v/${pkg.version}\n`;
+    .filter((file) => /^(license|copying|notice)(\.|$)/iv.test(file))
+    .toSorted();
+  if (files.length === 0) {
+    notices += `License: ${license ?? "See package source"}\nSource: https://www.npmjs.com/package/${name}/v/${version}\n`;
   }
-  for (const file of files) notices += `${await readFile(path.join(directory, file), "utf8")}\n`;
+  for (const file of files) {
+    notices += `${await readFile(path.join(directory, file), "utf8")}\n`;
+  }
 }
 await writeFile("dist/licenses.txt", notices);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { readConfig } from "../src/config.js";
 import { ConfigurationError } from "../src/errors.js";
 
@@ -26,16 +27,18 @@ const fleet = {
 function config(
   tiers: string,
   env: NodeJS.ProcessEnv = fleet,
-  inputs: Record<string, string> = {},
+  inputs: Readonly<Record<string, string>> = {},
 ) {
   const values: Record<string, string> = { path: "cache", key: "key", tiers, ...inputs };
-  return readConfig((name) => values[name] || "", { GITHUB_REPOSITORY: "owner/repo", ...env });
+  return readConfig((name) => values[name] ?? "", { GITHUB_REPOSITORY: "owner/repo", ...env });
 }
 function problems(tiers: string, env: NodeJS.ProcessEnv = fleet): string {
   try {
     config(tiers, env);
   } catch (error) {
-    if (error instanceof ConfigurationError) return error.message;
+    if (error instanceof ConfigurationError) {
+      return error.message;
+    }
     throw error;
   }
   throw new Error("The tiers were accepted");
@@ -265,7 +268,7 @@ describe("tiers input", () => {
       path: "cache",
       key: "key",
     };
-    const single = readConfig((name) => values[name] || "", { GITHUB_REPOSITORY: "owner/repo" });
+    const single = readConfig((name) => values[name] ?? "", { GITHUB_REPOSITORY: "owner/repo" });
     expect(single.tiers).toMatchObject([{ name: "default", save: true, bucket: "test-cache" }]);
     expect(single.skipped).toEqual([]);
   });

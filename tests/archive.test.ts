@@ -1,6 +1,8 @@
-import { afterEach, expect, it, vi } from "vitest";
 import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { afterEach, expect, it, vi } from "vitest";
+
 import { pack, unpack, digest } from "../src/archive.js";
 import { CompressionMethod } from "../src/archive.js";
 
@@ -19,7 +21,7 @@ it("round trips absolute cache paths containing spaces with the platform archive
     const compression = CompressionMethod.Zstd;
     const file = await pack(output, [cache], compression);
     expect(file).toBeDefined();
-    expect(await digest(file!)).toMatch(/^[a-f0-9]{64}$/);
+    expect(await digest(file!)).toMatch(/^[a-f0-9]{64}$/v);
     await rm(cache, { recursive: true });
     await unpack(file!, compression);
     expect(await readFile(path.join(cache, "package file.txt"), "utf8")).toBe(

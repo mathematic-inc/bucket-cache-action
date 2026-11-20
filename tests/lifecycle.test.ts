@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { CompressionMethod } from "../src/archive.js";
-import { namespace, readConfig, type Snapshot, type Tier } from "../src/config.js";
+import { namespace, readConfig, snapshotSchema, type Snapshot, type Tier } from "../src/config.js";
 import { Unavailable } from "../src/errors.js";
+import { post, restore, execute, save } from "../src/lifecycle.js";
 
 // A tier's storage, as the lifecycle uses it.
 function storage() {
@@ -27,8 +29,8 @@ const fixture = vi.hoisted(() => ({
   cleanup: vi.fn(),
 }));
 vi.mock("@actions/core", () => ({
-  getInput: (name: string) => fixture.inputs[name] || "",
-  getState: (name: string) => fixture.state[name] || "",
+  getInput: (name: string) => fixture.inputs[name] ?? "",
+  getState: (name: string) => fixture.state[name] ?? "",
   saveState: (name: string, value: string) => {
     fixture.state[name] = value;
   },
@@ -43,19 +45,19 @@ vi.mock("../src/storage.js", () => ({
   createStorage: (_config: unknown, tier: Tier) => {
     fixture.opened.push(tier.name);
     const found = fixture.tiers[tier.name];
-    if (!found) throw new Error(`No storage for tier ${tier.name}`);
+    if (!found) {
+      throw new Error(`No storage for tier ${tier.name}`);
+    }
     return found;
   },
 }));
 vi.mock("../src/archive.js", () => ({
   CompressionMethod: { Gzip: "gzip", Zstd: "zstd" },
-  temporaryDirectory: async () => "/test/temporary",
+  temporaryDirectory: () => Promise.resolve("/test/temporary"),
   pack: fixture.pack,
   unpack: fixture.unpack,
   cleanup: fixture.cleanup,
 }));
-
-import { post, restore, execute, save } from "../src/lifecycle.js";
 
 function tier(name: string): ReturnType<typeof storage> {
   const created = storage();
@@ -68,7 +70,14 @@ function tier(name: string): ReturnType<typeof storage> {
 }
 const unreachable = () => new Unavailable("No connection (ECONNREFUSED)", new Error("refused"));
 const denied = () => Object.assign(new Error("denied"), { $metadata: { httpStatusCode: 403 } });
-const message = (mock: typeof fixture.info) => mock.mock.calls.map(([text]) => String(text));
+function firstArguments(mock: typeof fixture.info): unknown[] {
+  const found: unknown[] = [];
+  for (const call of mock.mock.calls) {
+    found.push(call[0]);
+  }
+  return found;
+}
+const message = (mock: typeof fixture.info) => firstArguments(mock).map((text) => String(text));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -186,7 +195,7 @@ describe("automatic cache lifecycle", () => {
   });
   it("stores a validated snapshot of configuration without authentication tokens", async () => {
     await restore(true);
-    const config = readConfig((name) => fixture.inputs[name] || "", {
+    const config = readConfig((name) => fixture.inputs[name] ?? "", {
       GITHUB_REPOSITORY: "owner/repo",
     });
     const expected: Snapshot = {
@@ -247,14 +256,15 @@ describe("tiered cache lifecycle", () => {
       hot: { "any/": "any/hot" },
       cold: { "lock-a/": "lock-a/cold" },
     };
-    for (const [name, created] of Object.entries(tiers))
-      created.fallback.mockImplementation(async (prefix: string) => {
+    for (const [name, created] of Object.entries(tiers)) {
+      created.fallback.mockImplementation((prefix: string) => {
         const key = held[name]![prefix];
-        return key && { key, size: 1 };
+        return Promise.resolve(key === undefined ? undefined : { key, size: 1 });
       });
+    }
     await restore(true);
-    expect(tiers.hot.fallback.mock.calls.map(([prefix]) => prefix)).toEqual(["lock-a/"]);
-    expect(tiers.cold.fallback.mock.calls.map(([prefix]) => prefix)).toEqual(["lock-a/"]);
+    expect(firstArguments(tiers.hot.fallback)).toEqual(["lock-a/"]);
+    expect(firstArguments(tiers.cold.fallback)).toEqual(["lock-a/"]);
     expect(tiers.cold.connect.mock.invocationCallOrder[0]).toBeLessThan(
       tiers.hot.fallback.mock.invocationCallOrder[0]!,
     );
@@ -387,16 +397,21 @@ describe("tiered cache lifecycle", () => {
   it("writes a miss through to every tier at once, and one tier's failure stops no other", async () => {
     let started = 0;
     const order: string[] = [];
-    for (const [name, created] of Object.entries(tiers))
+    for (const [name, created] of Object.entries(tiers)) {
       created.upload.mockImplementation(async () => {
         started++;
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5);
+        });
         order.push(`${name} saw ${started}`);
-        if (name === "hot") throw denied();
+        if (name === "hot") {
+          throw denied();
+        }
         return true;
       });
+    }
     await restoreThenSave();
-    expect(order.sort()).toEqual(["cold saw 2", "hot saw 2"]);
+    expect(order.toSorted()).toEqual(["cold saw 2", "hot saw 2"]);
     expect(fixture.warning).toHaveBeenCalledWith(
       "Bucket cache save failed: Error, HTTP 403 (tier hot)",
     );
@@ -468,7 +483,7 @@ describe("tiered cache lifecycle", () => {
     vi.stubEnv("RR_S3_BUCKET", "fleet-cache");
     fixture.inputs.tiers = hot.replace("bucket: hot-cache", "bucket-env: RR_S3_BUCKET") + cold;
     await restore(true);
-    const snapshot = JSON.parse(fixture.state.snapshot!) as Snapshot;
+    const snapshot = snapshotSchema.parse(JSON.parse(fixture.state.snapshot!));
     expect(snapshot.config.tiers.map(({ name, bucket }) => [name, bucket])).toEqual([
       ["hot", "fleet-cache"],
       ["cold", "cold-cache"],
