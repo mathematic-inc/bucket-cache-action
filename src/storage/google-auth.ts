@@ -27,7 +27,7 @@ const credentialSchema = z.looseObject({
   ]),
 });
 
-// The library checks these options when it builds the client, so the action passes the JSON on.
+// The library validates these options when it builds the client.
 const externalAccountOptions = z.custom<ExternalAccountClientOptions>(isObject);
 const externalAccountAuthorizedUserOptions =
   z.custom<ConstructorParameters<typeof ExternalAccountAuthorizedUserClient>[0]>(isObject);

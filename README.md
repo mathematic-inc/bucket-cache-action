@@ -150,7 +150,7 @@ The error names the tier and key, never a value, since that is the workflow's
 mistake. A malformed value in the runner's environment is the runner's: it skips
 its tier with a warning naming the variable, never its value, or fails the step
 with `fail-on-error`. A workflow gives `tiers` or the single-bucket inputs, not
-both. Those inputs are one tier named `default`, and behave as they always have.
+both. Those inputs are one tier named `default`.
 
 A tier is present when the runner sets every variable it names, its credential
 prefix's `_ACCESS_KEY_ID` and `_SECRET_ACCESS_KEY` among them; an absent tier is
@@ -270,7 +270,7 @@ Objects use this layout:
 
 The version is the SHA-256 digest of the format version, path patterns,
 compression, OS, and architecture. A format-specific salt prevents accidental
-reuse of runs-on/cache archives. Existing caches start cold after migration.
+reuse of runs-on/cache archives.
 Archives use the current `tar` package and Node 24's native zstd implementation;
 no system tar or compression binary is required. Paths outside the workspace and
 file modes are preserved. Windows and Unix archives are deliberately separated.

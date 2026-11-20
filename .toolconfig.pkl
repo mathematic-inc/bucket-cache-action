@@ -14,7 +14,6 @@ toolconfig {
 
 sections {
   ["*"] {
-    // npm writes package-lock.json.
     oxfmt {
       ignorePatterns =
         List(

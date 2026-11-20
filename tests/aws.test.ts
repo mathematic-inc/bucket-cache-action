@@ -135,7 +135,6 @@ it("gives each connection to the bucket the configured deadline", () => {
   });
 });
 
-// A server that refuses every request.
 async function refusing(run: (endpoint: string) => Promise<void>) {
   const server = createServer((_request, response) => {
     response.writeHead(403, { "Content-Type": "application/xml" });
